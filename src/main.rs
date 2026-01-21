@@ -11,11 +11,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use config::Config;
 use glam::Vec3;
-use hud::draw_text;
-use log::{error};
+use hud::{TextStyle, draw_text};
+use log::error;
 use renderer::CudaRenderer;
 use softbuffer::{Context as SoftContext, Surface};
 use winit::{
@@ -48,6 +48,9 @@ struct App {
     fps_value: f32,
 }
 impl App {
+    const FOV_EPSILON: f32 = 1e-4;
+    const ROTATION_EPSILON: f32 = 1e-4;
+
     fn new(config: Config) -> Self {
         let cam_pos = Vec3::from_array(config.camera.position);
         let now = Instant::now();
@@ -126,114 +129,142 @@ impl App {
         if self.window.is_none() {
             return Ok(());
         }
-        if self.renderer.is_some() && self.surface.is_some() {
-            let position_delta = (self.cam_pos - self.prev_cam_pos).length();
-            let position_changed = position_delta > self.config.renderer.position_epsilon;
-            let rotation_changed =
-                (self.cam_yaw != self.prev_cam_yaw) || (self.cam_pitch != self.prev_cam_pitch);
-            let fov_changed = self.fov != self.prev_fov;
-            let should_render =
-                self.last_frame.is_none() || position_changed || rotation_changed || fov_changed;
-            if should_render {
-                let (fwd, rgt, up) = camera::calculate_camera_basis(self.cam_yaw, self.cam_pitch);
-                let fov_scale = (self.fov.to_radians() / 2.0).tan();
-                let buffer_u8 = {
-                    let renderer = self.renderer.as_mut().context("Renderer not initialized")?;
-                    renderer.render(
-                        self.cam_pos.to_array(),
-                        fwd.to_array(),
-                        rgt.to_array(),
-                        up.to_array(),
-                        fov_scale,
-                    )?
-                };
-                if self.config.renderer.save_first_frame {
-                    let path = Path::new(&self.config.renderer.first_frame_path);
-                    if !path.exists() {
-                        image::save_buffer(
-                            path,
-                            &buffer_u8,
-                            self.config.window.width,
-                            self.config.window.height,
-                            image::ColorType::Rgba8,
-                        )?;
-                    }
-                }
-                self.last_frame = Some(buffer_u8);
-                self.prev_cam_pos = self.cam_pos;
-                self.prev_cam_yaw = self.cam_yaw;
-                self.prev_cam_pitch = self.cam_pitch;
-                self.prev_fov = self.fov;
-            }
-            self.update_fps();
-            let buffer_u8 = self.last_frame.as_ref().context("Missing render buffer")?;
-            let width = self.config.window.width;
-            let height = self.config.window.height;
-            let margin_x = self.config.hud.margin[0] as i32;
-            let margin_y = self.config.hud.margin[1] as i32;
-            let scale = ((self.config.hud.font_size + 7) / 8).max(1);
-            let color = self.config.hud.color;
-            let info_text = format!(
-                "POS : {:.1} {:.1} {:.1}\nVIEW: Y={:.1} P={:.1} FOV={:.0}",
-                self.cam_pos.x,
-                self.cam_pos.y,
-                self.cam_pos.z,
-                self.cam_yaw,
-                self.cam_pitch,
-                self.fov
-            );
-            let fps_text = format!("FPS: {:.1}", self.fps_value);
-            let line_height = (hud::GLYPH_HEIGHT + 1) * scale as i32;
-            let fps_y = height as i32 - margin_y - line_height;
-            let surface = self.surface.as_mut().context("Surface not initialized")?;
-            let mut buffer = surface
-                .buffer_mut()
-                .map_err(|e| anyhow::anyhow!("Failed to access surface buffer: {e}"))?;
-            for (i, chunk) in buffer_u8.chunks_exact(4).enumerate() {
-                let r = chunk[0] as u32;
-                let g = chunk[1] as u32;
-                let b = chunk[2] as u32;
-                let pixel = (r << 16) | (g << 8) | b;
-                if i < buffer.len() {
-                    buffer[i] = pixel;
-                }
-            }
-            draw_text(
-                &mut buffer,
-                width,
-                height,
-                margin_x,
-                margin_y,
-                &info_text,
-                color,
-                scale,
-            );
-            draw_text(
-                &mut buffer,
-                width,
-                height,
-                margin_x,
-                fps_y,
-                &fps_text,
-                color,
-                scale,
-            );
-            buffer
-                .present()
-                .map_err(|e| anyhow::anyhow!("Failed to present frame: {e}"))?;
-            self.throttle_if_needed();
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
-            }
+        if self.renderer.is_none() || self.surface.is_none() {
+            return Ok(());
+        }
+        self.update_render_if_needed()?;
+        self.update_fps();
+        self.present_frame()?;
+        self.throttle_if_needed();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
         }
         Ok(())
+    }
+
+    fn update_render_if_needed(&mut self) -> Result<()> {
+        if !self.should_render() {
+            return Ok(());
+        }
+        let (fwd, rgt, up) = camera::calculate_camera_basis(self.cam_yaw, self.cam_pitch);
+        let fov_scale = (self.fov.to_radians() / 2.0).tan();
+        let buffer_u8 = {
+            let renderer = self.renderer.as_mut().context("Renderer not initialized")?;
+            renderer.render(
+                self.cam_pos.to_array(),
+                fwd.to_array(),
+                rgt.to_array(),
+                up.to_array(),
+                fov_scale,
+            )?
+        };
+        if self.config.renderer.save_first_frame {
+            let path = Path::new(&self.config.renderer.first_frame_path);
+            if !path.exists() {
+                image::save_buffer(
+                    path,
+                    &buffer_u8,
+                    self.config.window.width,
+                    self.config.window.height,
+                    image::ColorType::Rgba8,
+                )?;
+            }
+        }
+        self.last_frame = Some(buffer_u8);
+        self.prev_cam_pos = self.cam_pos;
+        self.prev_cam_yaw = self.cam_yaw;
+        self.prev_cam_pitch = self.cam_pitch;
+        self.prev_fov = self.fov;
+        Ok(())
+    }
+
+    fn should_render(&self) -> bool {
+        if self.last_frame.is_none() {
+            return true;
+        }
+        let position_delta = (self.cam_pos - self.prev_cam_pos).length();
+        if position_delta > self.config.renderer.position_epsilon {
+            return true;
+        }
+        let rotation_changed = (self.cam_yaw - self.prev_cam_yaw).abs() > Self::ROTATION_EPSILON
+            || (self.cam_pitch - self.prev_cam_pitch).abs() > Self::ROTATION_EPSILON;
+        if rotation_changed {
+            return true;
+        }
+        (self.fov - self.prev_fov).abs() > Self::FOV_EPSILON
+    }
+
+    fn present_frame(&mut self) -> Result<()> {
+        let buffer_u8 = self.last_frame.as_ref().context("Missing render buffer")?;
+        let width = self.config.window.width;
+        let height = self.config.window.height;
+        let hud_layout = self.build_hud_layout(width, height)?;
+        let surface = self.surface.as_mut().context("Surface not initialized")?;
+        let mut buffer = surface
+            .buffer_mut()
+            .map_err(|e| anyhow::anyhow!("Failed to access surface buffer: {e}"))?;
+        for (i, chunk) in buffer_u8.chunks_exact(4).enumerate() {
+            let pixel =
+                (u32::from(chunk[0]) << 16) | (u32::from(chunk[1]) << 8) | u32::from(chunk[2]);
+            if let Some(slot) = buffer.get_mut(i) {
+                *slot = pixel;
+            }
+        }
+        draw_hud(&mut buffer, &hud_layout);
+        buffer
+            .present()
+            .map_err(|e| anyhow::anyhow!("Failed to present frame: {e}"))?;
+        Ok(())
+    }
+
+    fn build_hud_layout(&self, width: u32, height: u32) -> Result<HudLayout> {
+        let margin_x =
+            i32::try_from(self.config.hud.margin[0]).context("HUD margin_x exceeds i32 range")?;
+        let margin_y =
+            i32::try_from(self.config.hud.margin[1]).context("HUD margin_y exceeds i32 range")?;
+        let font_size = self.config.hud.font_size;
+        if font_size == 0 {
+            return Err(anyhow!("HUD 字体大小不能为 0"));
+        }
+        let scale = font_size.div_ceil(8);
+        let scale_i32 = i32::try_from(scale).context("HUD scale exceeds i32 range")?;
+        let height_i32 = i32::try_from(height).context("Window height exceeds i32 range")?;
+        let line_height = (hud::GLYPH_HEIGHT + 1) * scale_i32;
+        let fps_y = height_i32 - margin_y - line_height;
+        let style = TextStyle {
+            width,
+            height,
+            color: self.config.hud.color,
+            scale,
+        };
+        let info_text = format!(
+            "POS : {:.1} {:.1} {:.1}\nVIEW: Y={:.1} P={:.1} FOV={:.0}",
+            self.cam_pos.x, self.cam_pos.y, self.cam_pos.z, self.cam_yaw, self.cam_pitch, self.fov
+        );
+        let fps_text = format!("FPS: {:.1}", self.fps_value);
+        Ok(HudLayout {
+            style,
+            margin_x,
+            margin_y,
+            fps_y,
+            info_text,
+            fps_text,
+        })
     }
 
     fn update_fps(&mut self) {
         self.fps_frames += 1;
         let elapsed = self.fps_last_instant.elapsed();
         if elapsed >= Duration::from_secs(1) {
-            self.fps_value = self.fps_frames as f32 / elapsed.as_secs_f32();
+            let elapsed_secs = elapsed.as_secs_f64();
+            let fps = f64::from(self.fps_frames) / elapsed_secs;
+            match f32_from_f64(fps) {
+                Ok(value) => self.fps_value = value,
+                Err(err) => {
+                    error!("FPS 计算失败: {err}");
+                    self.fps_value = 0.0;
+                }
+            }
             self.fps_frames = 0;
             self.fps_last_instant = Instant::now();
         }
@@ -245,12 +276,39 @@ impl App {
         }
         let target = Duration::from_secs_f32(1.0 / 60.0);
         let elapsed = self.last_present.elapsed();
-        if elapsed < target {
-            std::thread::sleep(target - elapsed);
+        if let Some(remaining) = target.checked_sub(elapsed) {
+            std::thread::sleep(remaining);
         }
         self.last_present = Instant::now();
     }
 }
+
+struct HudLayout {
+    style: TextStyle,
+    margin_x: i32,
+    margin_y: i32,
+    fps_y: i32,
+    info_text: String,
+    fps_text: String,
+}
+
+fn draw_hud(buffer: &mut [u32], layout: &HudLayout) {
+    draw_text(
+        buffer,
+        &layout.style,
+        layout.margin_x,
+        layout.margin_y,
+        &layout.info_text,
+    );
+    draw_text(
+        buffer,
+        &layout.style,
+        layout.margin_x,
+        layout.fps_y,
+        &layout.fps_text,
+    );
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
@@ -264,12 +322,12 @@ impl ApplicationHandler for App {
                 Ok(w) => {
                     self.window = Some(Arc::new(w));
                     if let Err(e) = self.init_renderer() {
-                        error!("Failed to initialize renderer: {:?}", e);
+                        error!("Failed to initialize renderer: {e:?}");
                         event_loop.exit();
                     }
                 }
                 Err(e) => {
-                    error!("Failed to create window: {:?}", e);
+                    error!("Failed to create window: {e:?}");
                     event_loop.exit();
                 }
             }
@@ -289,7 +347,7 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 self.update_camera();
                 if let Err(e) = self.render() {
-                    error!("Render failed: {:?}", e);
+                    error!("Render failed: {e:?}");
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -300,8 +358,12 @@ impl ApplicationHandler for App {
                             if keycode == KeyCode::Escape {
                                 self.mouse_locked = false;
                                 if let Some(w) = &self.window {
-                                    let _ = w.set_cursor_visible(true);
-                                    let _ = w.set_cursor_grab(winit::window::CursorGrabMode::None);
+                                    w.set_cursor_visible(true);
+                                    if let Err(err) =
+                                        w.set_cursor_grab(winit::window::CursorGrabMode::None)
+                                    {
+                                        error!("释放鼠标捕获失败: {err}");
+                                    }
                                 }
                             }
                             self.keys_pressed.insert(keycode);
@@ -316,18 +378,30 @@ impl ApplicationHandler for App {
                 if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
                     self.mouse_locked = true;
                     if let Some(w) = &self.window {
-                        let _ = w.set_cursor_visible(false);
-                        let _ = w
-                            .set_cursor_grab(winit::window::CursorGrabMode::Confined)
-                            .or_else(|_| w.set_cursor_grab(winit::window::CursorGrabMode::Locked));
+                        w.set_cursor_visible(false);
+                        if let Err(err) = w.set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                            && let Err(fallback_err) =
+                                w.set_cursor_grab(winit::window::CursorGrabMode::Locked)
+                        {
+                            error!("鼠标捕获失败: confined={err}, locked={fallback_err}");
+                        }
                     }
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 if self.mouse_locked {
                     let scroll = match delta {
-                        winit::event::MouseScrollDelta::LineDelta(_, y) => y,
-                        winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32 / 120.0,
+                        winit::event::MouseScrollDelta::LineDelta(_, y) => Ok(y),
+                        winit::event::MouseScrollDelta::PixelDelta(pos) => {
+                            f32_from_f64(pos.y).map(|value| value / 120.0)
+                        }
+                    };
+                    let scroll = match scroll {
+                        Ok(value) => value,
+                        Err(err) => {
+                            error!("滚轮输入转换失败: {err}");
+                            return;
+                        }
                     };
                     self.fov -= scroll * self.config.camera.zoom_speed;
                     let min_fov = self.config.camera.fov_limit[0];
@@ -345,21 +419,50 @@ impl ApplicationHandler for App {
         _device_id: winit::event::DeviceId,
         event: DeviceEvent,
     ) {
-        match event {
-            DeviceEvent::MouseMotion { delta } => {
-                if self.mouse_locked {
-                    let (dx, dy) = delta;
-                    let sensitivity = self.config.controls.mouse_sensitivity as f32;
-                    self.cam_yaw += (dx as f32) * sensitivity;
-                    self.cam_pitch -= (dy as f32) * sensitivity;
-                    let min_p = self.config.camera.pitch_limit[0];
-                    let max_p = self.config.camera.pitch_limit[1];
-                    self.cam_pitch = self.cam_pitch.clamp(min_p, max_p);
+        if let DeviceEvent::MouseMotion { delta } = event
+            && self.mouse_locked
+        {
+            let (dx, dy) = delta;
+            let sensitivity = self.config.controls.mouse_sensitivity;
+            let dx = match f32_from_f64(dx) {
+                Ok(value) => value,
+                Err(err) => {
+                    error!("鼠标移动 X 轴转换失败: {err}");
+                    return;
                 }
-            }
-            _ => (),
+            };
+            let dy = match f32_from_f64(dy) {
+                Ok(value) => value,
+                Err(err) => {
+                    error!("鼠标移动 Y 轴转换失败: {err}");
+                    return;
+                }
+            };
+            self.cam_yaw += dx * sensitivity;
+            self.cam_pitch -= dy * sensitivity;
+            let min_p = self.config.camera.pitch_limit[0];
+            let max_p = self.config.camera.pitch_limit[1];
+            self.cam_pitch = self.cam_pitch.clamp(min_p, max_p);
         }
     }
+}
+fn f32_from_f64(value: f64) -> Result<f32> {
+    if !value.is_finite() {
+        return Err(anyhow!("数值不是有限值: {value}"));
+    }
+    let min = f64::from(f32::MIN);
+    let max = f64::from(f32::MAX);
+    if value < min || value > max {
+        return Err(anyhow!("数值超出 f32 范围: {value}"));
+    }
+    let parsed: f32 = value
+        .to_string()
+        .parse()
+        .map_err(|err| anyhow!("解析 f32 失败: {err}"))?;
+    if !parsed.is_finite() {
+        return Err(anyhow!("转换后数值不是有限值: {parsed}"));
+    }
+    Ok(parsed)
 }
 fn main() -> Result<()> {
     env_logger::init();

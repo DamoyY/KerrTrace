@@ -1,17 +1,41 @@
+use anyhow::{Result, anyhow};
+use log::error;
+
 pub fn generate_blackbody_lut(
     size: usize,
     max_temp: f32,
     wavelength_start: f32,
     wavelength_end: f32,
     wavelength_step: f32,
-) -> (Vec<f32>, f32) {
+) -> Result<(Vec<f32>, f32)> {
+    if size < 2 {
+        error!("黑体查找表尺寸过小: {size}");
+        return Err(anyhow!("黑体查找表尺寸必须至少为 2"));
+    }
+    if !wavelength_step.is_finite() || wavelength_step <= 0.0 {
+        error!("波长步进无效: {wavelength_step}");
+        return Err(anyhow!("波长步进必须为正数且有限"));
+    }
     let mut lut_data = Vec::with_capacity(size * 3);
+    let denom_usize = size - 1;
+    let denom_u32 =
+        u32::try_from(denom_usize).map_err(|_| anyhow!("黑体查找表尺寸超出 u32 范围: {size}"))?;
+    let denom_f = f64::from(denom_u32);
     let temps: Vec<f32> = (0..size)
-        .map(|i| (i as f32 / (size - 1) as f32) * max_temp)
-        .collect();
+        .map(|i| {
+            let i_u32 =
+                u32::try_from(i).map_err(|_| anyhow!("黑体查找表索引超出 u32 范围: {i}"))?;
+            let ratio = f64::from(i_u32) / denom_f;
+            let temp = ratio * f64::from(max_temp);
+            f32_from_f64_checked(temp).map_err(|err| anyhow!("温度值转换失败: {err}"))
+        })
+        .collect::<Result<Vec<f32>>>()?;
     let mut lambdas = Vec::new();
     let mut l = wavelength_start;
-    while l <= wavelength_end + 0.0001 {
+    loop {
+        if l > wavelength_end {
+            break;
+        }
         lambdas.push(l);
         l += wavelength_step;
     }
@@ -37,7 +61,7 @@ pub fn generate_blackbody_lut(
         lut_data.push(g);
         lut_data.push(b);
     }
-    (lut_data, max_temp)
+    Ok((lut_data, max_temp))
 }
 fn gaussian(x: f32, alpha: f32, mu: f32, sigma1: f32, sigma2: f32) -> f32 {
     let sigma = if x < mu { sigma1 } else { sigma2 };
@@ -70,15 +94,41 @@ fn planck_law(lambdas: &[f32], t: f32) -> Vec<f32> {
         if exponent > 80.0 {
             val.push(0.0);
         } else {
-            let v = (1.0 / l.powi(5)) / (exponent.exp() - 1.0);
+            let v = (1.0 / l.powi(5)) / exponent.exp_m1();
             val.push(v * 1e15);
         }
     }
     val
 }
-fn xyz_to_rgb(x: f32, y: f32, z: f32) -> (f32, f32, f32) {
-    let r = 3.240_454_2 * x - 1.537_138_5 * y - 0.498_531_4 * z;
-    let g = -0.969_266_0 * x + 1.876_010_8 * y + 0.041_556_0 * z;
-    let b = 0.055_643_4 * x - 0.204_025_9 * y + 1.057_225_2 * z;
-    (r, g, b)
+fn xyz_to_rgb(x_val: f32, y_val: f32, z_val: f32) -> (f32, f32, f32) {
+    let red = (3.240_454f32).mul_add(
+        x_val,
+        (-1.537_138_5f32).mul_add(y_val, -0.498_531_4f32 * z_val),
+    );
+    let green =
+        (-0.969_266f32).mul_add(x_val, (1.876_010_8f32).mul_add(y_val, 0.041_556f32 * z_val));
+    let blue = (0.055_643_4f32).mul_add(
+        x_val,
+        (-0.204_025_9f32).mul_add(y_val, 1.057_225_2f32 * z_val),
+    );
+    (red, green, blue)
+}
+
+fn f32_from_f64_checked(value: f64) -> Result<f32> {
+    if !value.is_finite() {
+        return Err(anyhow!("数值不是有限值: {value}"));
+    }
+    let min = f64::from(f32::MIN);
+    let max = f64::from(f32::MAX);
+    if value < min || value > max {
+        return Err(anyhow!("数值超出 f32 范围: {value}"));
+    }
+    let parsed: f32 = value
+        .to_string()
+        .parse()
+        .map_err(|err| anyhow!("解析 f32 失败: {err}"))?;
+    if !parsed.is_finite() {
+        return Err(anyhow!("转换后数值不是有限值: {parsed}"));
+    }
+    Ok(parsed)
 }

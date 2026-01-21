@@ -26,7 +26,7 @@ impl CudaRenderer {
     pub fn new(config: &Config, cuda_dir: &Path) -> Result<Self> {
         let u_width = config.window.width;
         let u_height = config.window.height;
-        let context = CudaContext::new(0).context("Failed to initialize CUDA context")?;
+        let context = CudaContext::new(0).context("初始化 CUDA 上下文失败")?;
         let stream = context.default_stream();
         let (lut_cpu, lut_max_temp) = generate_blackbody_lut(
             config.blackbody.lut_size,
@@ -34,13 +34,15 @@ impl CudaRenderer {
             config.blackbody.wavelength_start,
             config.blackbody.wavelength_end,
             config.blackbody.wavelength_step,
-        );
-        let lut_size = config.blackbody.lut_size as i32;
+        )
+        .context("生成黑体查找表失败")?;
+        let lut_size =
+            i32::try_from(config.blackbody.lut_size).context("LUT size exceeds i32 range")?;
         let lut = stream
             .clone_htod(&lut_cpu)
-            .context("Failed to copy LUT to GPU")?;
+            .context("复制 LUT 到 GPU 失败")?;
         let kernel_source =
-            fs::read_to_string(cuda_dir.join("kernel.cu")).context("Failed to read kernel.cu")?;
+            fs::read_to_string(cuda_dir.join("kernel.cu")).context("读取 kernel.cu 失败")?;
         let defines = build_cuda_defines(&config.kernel);
         let full_source = format!("{defines}\n{kernel_source}");
         let ptx_opts = CompileOptions {
@@ -49,20 +51,16 @@ impl CudaRenderer {
             name: Some("kernel".to_string()),
             ..Default::default()
         };
-        let ptx = compile_ptx_with_opts(&full_source, ptx_opts).context("Failed to compile PTX")?;
-        let module = context
-            .load_module(ptx)
-            .context("Failed to load PTX module")?;
-        let kernel = module
-            .load_function("kernel")
-            .context("Failed to get kernel function")?;
+        let ptx = compile_ptx_with_opts(&full_source, ptx_opts).context("编译 PTX 失败")?;
+        let module = context.load_module(ptx).context("加载 PTX 模块失败")?;
+        let kernel = module.load_function("kernel").context("获取核函数失败")?;
         let image_gpu = stream
             .alloc_zeros::<u8>((u_width * u_height * 4) as usize)
-            .context("Failed to allocate image buffer")?;
+            .context("allocate 图像缓存失败")?;
         let block_x = config.renderer.block_dim[0];
         let block_y = config.renderer.block_dim[1];
-        let grid_x = (u_width + block_x - 1) / block_x;
-        let grid_y = (u_height + block_y - 1) / block_y;
+        let grid_x = u_width.div_ceil(block_x);
+        let grid_y = u_height.div_ceil(block_y);
         Ok(Self {
             stream,
             kernel,
@@ -90,8 +88,8 @@ impl CudaRenderer {
             block_dim: self.block_dim,
             shared_mem_bytes: 0,
         };
-        let width = self.width as i32;
-        let height = self.height as i32;
+        let width = i32::try_from(self.width).context("Window width exceeds i32 range")?;
+        let height = i32::try_from(self.height).context("Window height exceeds i32 range")?;
         let cam_x = cam_pos[0];
         let cam_y = cam_pos[1];
         let cam_z = cam_pos[2];
