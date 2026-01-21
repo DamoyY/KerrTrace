@@ -8,6 +8,7 @@ from pyglet.window import key
 from .camera import calculate_camera_basis
 from .blackbody import generate_blackbody_lut
 
+
 class CudaRenderer(pyglet.window.Window):
     def __init__(self, width=2100, height=900, current_dir="."):
         super().__init__(width=width, height=height, vsync=False)
@@ -29,7 +30,6 @@ class CudaRenderer(pyglet.window.Window):
         self.grid_dim = (self.grid_x, self.grid_y)
         self.lut, self.lut_max_temp = generate_blackbody_lut()
         self.lut_size = self.lut.shape[0]
-        
         cuda_dir = os.path.join(current_dir, "cuda")
         compile_options = ("-use_fast_math", f"-I{cuda_dir}")
         with open(
@@ -39,7 +39,6 @@ class CudaRenderer(pyglet.window.Window):
             cuda_source += f"\n//{time.time()}\n"
         self.module = cp.RawModule(code=cuda_source, options=compile_options)
         self.kernel = self.module.get_function("kernel")
-        
         self.channels = 4
         self.image_gpu = cp.zeros(
             (height, width, self.channels), dtype=cp.uint8

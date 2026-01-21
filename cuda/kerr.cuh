@@ -1,30 +1,28 @@
 #ifndef KERR_CUH
 #define KERR_CUH
-
 struct KerrParams
 {
     float a, M, aa, inv_M, A_norm, rh, disk_inner;
 };
-
 struct RayState
 {
     float r, theta, phi, pr, pth, pph;
 };
-
 struct RayDerivs
 {
     float dr, dth, dph, dpr, dpth;
 };
-
 __device__ __forceinline__ float dot(float3 a, float3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 __device__ __forceinline__ float length(float3 a) { return __fsqrt_rn(dot(a, a)); }
-__device__ __forceinline__ float3 normalize(float3 a) { float inv = rsqrtf(dot(a, a)); return make_float3(a.x * inv, a.y * inv, a.z * inv); }
-
+__device__ __forceinline__ float3 normalize(float3 a)
+{
+    float inv = rsqrtf(dot(a, a));
+    return make_float3(a.x * inv, a.y * inv, a.z * inv);
+}
 __device__ __forceinline__ float fast_cbrtf(float x)
 {
     return __powf(x, 1.0f / 3.0f);
 }
-
 __device__ __forceinline__ float calc_isco(float A_norm, bool prograde, float M)
 {
     float aa = A_norm * A_norm;
@@ -34,24 +32,22 @@ __device__ __forceinline__ float calc_isco(float A_norm, bool prograde, float M)
     float term_inside = (3.0f - Z1) * (3.0f + Z1 + 2.0f * Z2);
     return M * (3.0f + Z2 + sign * __fsqrt_rn(fmaxf(term_inside, 0.0f)));
 }
-
 __device__ float calc_novikov_thorne_factor(float r, float A_norm, float r_isco, float inv_M)
 {
-    if (r <= r_isco) return 0.0f;
-    if (fabsf(A_norm) < 1e-8f) A_norm = (A_norm >= 0 ? 1e-8f : -1e-8f);
-
+    if (r <= r_isco)
+        return 0.0f;
+    if (fabsf(A_norm) < 1e-8f)
+        A_norm = (A_norm >= 0 ? 1e-8f : -1e-8f);
     float R_norm = r * inv_M;
     float R_isco_norm = r_isco * inv_M;
     float x = __fsqrt_rn(R_norm);
     float x_ms = __fsqrt_rn(R_isco_norm);
-
     float angle_base = acosf(-A_norm) * 0.33333333f;
     const float ang_step = 2.094395102f;
     float roots[3] = {
         2.0f * cosf(angle_base),
         2.0f * cosf(angle_base - ang_step),
         2.0f * cosf(angle_base + ang_step)};
-
     float sum_log = 0.0f;
 #pragma unroll
     for (int i = 0; i < 3; i++)
@@ -59,14 +55,13 @@ __device__ float calc_novikov_thorne_factor(float r, float A_norm, float r_isco,
         float xi = roots[i];
         float coef = __fdividef(3.0f * (xi - A_norm) * (xi - A_norm), xi * (xi - roots[(i + 1) % 3]) * (xi - roots[(i + 2) % 3]));
         float val = __fdividef(x - xi, x_ms - xi);
-        if (val > 0.0f) sum_log += coef * __logf(val);
+        if (val > 0.0f)
+            sum_log += coef * __logf(val);
     }
-
     float Q = (x - x_ms) - 1.5f * A_norm * __logf(__fdividef(x, x_ms)) - sum_log;
     float geometric_denom = R_norm * (R_norm * x - 3.0f * x + 2.0f * A_norm);
     return geometric_denom < 1e-8f ? 0.0f : fmaxf(__fdividef(Q, geometric_denom), 0.0f);
 }
-
 __device__ __forceinline__ RayDerivs get_derivs(const RayState &s, const KerrParams &p)
 {
     float sin_th, cos_th;
@@ -77,7 +72,6 @@ __device__ __forceinline__ RayDerivs get_derivs(const RayState &s, const KerrPar
     float inv_Sigma = __fdividef(1.0f, Sigma + 1e-8f);
     float inv_Delta = __fdividef(1.0f, fmaxf(Delta, 1e-8f));
     float K = (s.r * s.r + p.aa) - p.a * s.pph;
-
     RayDerivs d;
     d.dr = inv_Sigma * Delta * s.pr;
     d.dth = inv_Sigma * s.pth;
@@ -86,7 +80,6 @@ __device__ __forceinline__ RayDerivs get_derivs(const RayState &s, const KerrPar
     d.dpth = inv_Sigma * sin_th * cos_th * (__fdividef(s.pph * s.pph, s2 * s2) - p.aa);
     return d;
 }
-
 __device__ __forceinline__ float3 get_sky_color(float3 dir, float transmittance)
 {
     const float PI = 3.14159265f;
@@ -96,7 +89,6 @@ __device__ __forceinline__ float3 get_sky_color(float3 dir, float transmittance)
     float line_thickness = 5e-4f;
     float d_theta = fmodf(fabsf(theta_sky), grid_spacing);
     float d_phi = fmodf(fabsf(phi_lat_sky), grid_spacing);
-
     bool is_grid = (d_theta < line_thickness || d_theta > (grid_spacing - line_thickness)) ||
                    (d_phi < line_thickness || d_phi > (grid_spacing - line_thickness)) ||
                    (fabsf(phi_lat_sky) < line_thickness * 3.0f);
@@ -104,7 +96,6 @@ __device__ __forceinline__ float3 get_sky_color(float3 dir, float transmittance)
     float intensity = is_grid ? 5.0f * transmittance : 0.0f;
     return make_float3(intensity, intensity, intensity);
 }
-
 __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_size, float max_temp)
 {
     KerrParams p;
@@ -115,31 +106,25 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
     p.A_norm = p.a * p.inv_M;
     p.rh = p.M + __fsqrt_rn(fmaxf(p.M * p.M - p.aa, 0.0f));
     p.disk_inner = calc_isco(p.A_norm, true, p.M);
-
     float3 ray_n = normalize(ray_dir);
     float r_init = length(cam_pos);
     float th_init = acosf(__fdividef(cam_pos.y, r_init));
     float ph_init = atan2f(cam_pos.x, cam_pos.z);
-
     float st, ct, sp, cp;
     __sincosf(th_init, &st, &ct);
     __sincosf(ph_init, &sp, &cp);
-
     float3 e_r = make_float3(st * sp, ct, st * cp);
     float3 e_th = make_float3(ct * sp, -st, ct * cp);
     float3 e_ph = make_float3(cp, 0.0f, -sp);
-
     float v_r_loc = dot(ray_n, e_r);
     float v_th_loc = dot(ray_n, e_th);
     float v_ph_loc = dot(ray_n, e_ph);
-
     RayState s;
     s.r = r_init;
     s.theta = th_init;
     s.phi = ph_init;
     s.pth = s.r * v_th_loc;
     s.pph = s.r * st * v_ph_loc;
-
     float s2 = st * st;
     float Sigma = s.r * s.r + p.aa * ct * ct;
     float Delta = s.r * s.r - 2.0f * p.M * s.r + p.aa;
@@ -149,15 +134,12 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
     float g_phph = (Delta - p.aa * s2) * inv_SD / fmaxf(s2, 1e-8f);
     float g_tph = -(2.0f * p.M * s.r * p.a) * inv_SD;
     float g_tt = -(((s.r * s.r + p.aa) * (s.r * s.r + p.aa) - p.aa * Delta * s2) * inv_SD);
-
     float pr_sq = __fdividef(-(g_tt - 2.0f * g_tph * s.pph + g_phph * s.pph * s.pph + g_thth * s.pth * s.pth), g_rr);
     s.pr = (v_r_loc < 0.0f ? -1.0f : 1.0f) * __fsqrt_rn(fmaxf(pr_sq, 0.0f));
-
     float3 color = make_float3(0.0f, 0.0f, 0.0f);
     float transmittance = 1.0f;
     float h = 1.0f;
     const float tol = 1e-4f;
-
     static const float a21 = 0.2f;
     static const float a31 = 3.0f / 40.0f, a32 = 9.0f / 40.0f;
     static const float a41 = 0.3f, a42 = -0.9f, a43 = 1.2f;
@@ -165,7 +147,6 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
     static const float a61 = 1631.0f / 55296.0f, a62 = 175.0f / 512.0f, a63 = 575.0f / 13824.0f, a64 = 44275.0f / 110592.0f, a65 = 253.0f / 4096.0f;
     static const float b1 = 37.0f / 378.0f, b3 = 250.0f / 621.0f, b4 = 125.0f / 594.0f, b6 = 512.0f / 1771.0f;
     static const float dc1 = 37.0f / 378.0f - 2825.0f / 27648.0f, dc3 = 250.0f / 621.0f - 18575.0f / 48384.0f, dc4 = 125.0f / 594.0f - 13525.0f / 55296.0f, dc5 = -277.0f / 14336.0f, dc6 = 512.0f / 1771.0f - 0.25f;
-
     for (int i = 0; i < 100 && transmittance > 1e-3f; i++)
     {
         RayDerivs k1, k2, k3, k4, k5, k6;
@@ -173,7 +154,6 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
         float error;
         int attempts = 0;
         bool accepted = false;
-
         while (!accepted && attempts < 50)
         {
             k1 = get_derivs(s, p);
@@ -182,7 +162,6 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
             k4 = get_derivs({s.r + h * (a41 * k1.dr + a42 * k2.dr + a43 * k3.dr), s.theta + h * (a41 * k1.dth + a42 * k2.dth + a43 * k3.dth), 0, s.pr + h * (a41 * k1.dpr + a42 * k2.dpr + a43 * k3.dpr), s.pth + h * (a41 * k1.dpth + a42 * k2.dpth + a43 * k3.dpth), s.pph}, p);
             k5 = get_derivs({s.r + h * (a51 * k1.dr + a52 * k2.dr + a53 * k3.dr + a54 * k4.dr), s.theta + h * (a51 * k1.dth + a52 * k2.dth + a53 * k3.dth + a54 * k4.dth), 0, s.pr + h * (a51 * k1.dpr + a52 * k2.dpr + a53 * k3.dpr + a54 * k4.dpr), s.pth + h * (a51 * k1.dpth + a52 * k2.dpth + a53 * k3.dpth + a54 * k4.dpth), s.pph}, p);
             k6 = get_derivs({s.r + h * (a61 * k1.dr + a62 * k2.dr + a63 * k3.dr + a64 * k4.dr + a65 * k5.dr), s.theta + h * (a61 * k1.dth + a62 * k2.dth + a63 * k3.dth + a64 * k4.dth + a65 * k5.dth), 0, s.pr + h * (a61 * k1.dpr + a62 * k2.dpr + a63 * k3.dpr + a64 * k4.dpr + a65 * k5.dpr), s.pth + h * (a61 * k1.dpth + a62 * k2.dpth + a63 * k3.dpth + a64 * k4.dpth + a65 * k5.dpth), s.pph}, p);
-
             next_s = {
                 s.r + h * (b1 * k1.dr + b3 * k3.dr + b4 * k4.dr + b6 * k6.dr),
                 s.theta + h * (b1 * k1.dth + b3 * k3.dth + b4 * k4.dth + b6 * k6.dth),
@@ -190,28 +169,25 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
                 s.pr + h * (b1 * k1.dpr + b3 * k3.dpr + b4 * k4.dpr + b6 * k6.dpr),
                 s.pth + h * (b1 * k1.dpth + b3 * k3.dpth + b4 * k4.dpth + b6 * k6.dpth),
                 s.pph};
-
             error = fmaxf(fmaxf(fabsf(h * (dc1 * k1.dr + dc3 * k3.dr + dc4 * k4.dr + dc5 * k5.dr + dc6 * k6.dr)) / (1e-8f + tol * fabsf(s.r)),
-                               fabsf(h * (dc1 * k1.dth + dc3 * k3.dth + dc4 * k4.dth + dc5 * k5.dth + dc6 * k6.dth)) / (1e-8f + tol * fabsf(s.theta))),
+                                fabsf(h * (dc1 * k1.dth + dc3 * k3.dth + dc4 * k4.dth + dc5 * k5.dth + dc6 * k6.dth)) / (1e-8f + tol * fabsf(s.theta))),
                           fmaxf(fabsf(h * (dc1 * k1.dpr + dc3 * k3.dpr + dc4 * k4.dpr + dc5 * k5.dpr + dc6 * k6.dpr)) / (1e-8f + tol * fabsf(s.pr)),
                                 fmaxf(fabsf(h * (dc1 * k1.dpth + dc3 * k3.dpth + dc4 * k4.dpth + dc5 * k5.dpth + dc6 * k6.dpth)) / (1e-8f + tol * fabsf(s.pth)), 1e-8f)));
-
-            if (error <= 1.0f) accepted = true;
+            if (error <= 1.0f)
+                accepted = true;
             h = fmaxf(h * 0.9f * __powf(fmaxf(error, 1e-8f), -0.2f), 1e-8f);
             attempts++;
         }
-
         float prev_r = s.r, prev_th = s.theta;
         s = next_s;
-
-        if (s.r < p.rh + 5e-7f) break;
+        if (s.r < p.rh + 5e-7f)
+            break;
         if ((prev_th < 1.570796327f && s.theta >= 1.570796327f) || (prev_th > 1.570796327f && s.theta <= 1.570796327f))
         {
             RayDerivs ke = get_derivs(s, p);
             float t = (1.570796327f - prev_th) / (s.theta - prev_th + 1e-8f);
             float t2 = t * t, t3 = t2 * t;
             float r_hit = (2 * t3 - 3 * t2 + 1) * prev_r + (t3 - 2 * t2 + t) * (k1.dr * h) + (-2 * t3 + 3 * t2) * s.r + (t3 - t2) * (ke.dr * h);
-
             if (r_hit >= p.disk_inner && r_hit <= 1000.0f)
             {
                 float sqrt_M = __fsqrt_rn(p.M), r_sqrt = __fsqrt_rn(r_hit);
@@ -235,11 +211,12 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
         if (s.r > 1000.0f)
         {
             float sn, cn, spn, cpn;
-            __sincosf(s.theta, &sn, &cn); __sincosf(s.phi, &spn, &cpn);
+            __sincosf(s.theta, &sn, &cn);
+            __sincosf(s.phi, &spn, &cpn);
             float f = 1.0f - 2.0f * p.M / s.r;
             float3 ed = normalize(make_float3(f * s.pr * sn * spn + s.pth / s.r * cn * spn + s.pph / (s.r * sn) * cpn,
-                                             f * s.pr * cn - s.pth / s.r * sn,
-                                             f * s.pr * sn * cpn + s.pth / s.r * cn * cpn - s.pph / (s.r * sn) * spn));
+                                              f * s.pr * cn - s.pth / s.r * sn,
+                                              f * s.pr * sn * cpn + s.pth / s.r * cn * cpn - s.pph / (s.r * sn) * spn));
             color.x += get_sky_color(ed, transmittance).x;
             color.y += get_sky_color(ed, transmittance).y;
             color.z += get_sky_color(ed, transmittance).z;

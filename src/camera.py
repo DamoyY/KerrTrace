@@ -2,6 +2,7 @@ import math
 import numpy as np
 from .utils import normalize
 
+
 def calculate_camera_basis(yaw, pitch):
     yaw_rad = math.radians(yaw)
     pitch_rad = math.radians(pitch)

@@ -1,6 +1,7 @@
 import numpy as np
 import cupy as cp
 
+
 def generate_blackbody_lut():
     size = 4096
     max_temp = 1e5
