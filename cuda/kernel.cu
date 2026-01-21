@@ -55,13 +55,13 @@ extern "C"
         const float3 cam_pos = make_float3(cam_x, cam_y, cam_z);
         float start_offset = 0.5f * INV_SAMPLES;
         float u_start = ((x + start_offset) * inv_w_2 - 1.0f) * aspect_ratio * fov_scale;
-        float v_start = ((y + start_offset) * inv_h_2 - 1.0f) * fov_scale;
+        float v_start = (1.0f - (y + start_offset) * inv_h_2) * fov_scale;
         float3 ray_base;
         ray_base.x = u_start * rgt_x + v_start * up_x + fwd_x;
         ray_base.y = u_start * rgt_y + v_start * up_y + fwd_y;
         ray_base.z = u_start * rgt_z + v_start * up_z + fwd_z;
         float du = (INV_SAMPLES * inv_w_2) * aspect_ratio * fov_scale;
-        float dv = (INV_SAMPLES * inv_h_2) * fov_scale;
+        float dv = -(INV_SAMPLES * inv_h_2) * fov_scale;
         float3 step_x, step_y;
         step_x.x = rgt_x * du;
         step_x.y = rgt_y * du;

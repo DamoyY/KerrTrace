@@ -1,9 +1,11 @@
 use std::{fs, path::Path, sync::Arc};
+
 use anyhow::{Context, Result};
 use cudarc::{
     driver::{CudaContext, CudaFunction, CudaSlice, CudaStream, LaunchConfig, PushKernelArg},
     nvrtc::{CompileOptions, compile_ptx_with_opts},
 };
+
 use crate::{
     blackbody::generate_blackbody_lut,
     config::{Config, KernelConfig},
@@ -24,8 +26,6 @@ impl CudaRenderer {
     pub fn new(config: &Config, cuda_dir: &Path) -> Result<Self> {
         let u_width = config.window.width;
         let u_height = config.window.height;
-        let width = u_width as i32;
-        let height = u_height as i32;
         let context = CudaContext::new(0).context("Failed to initialize CUDA context")?;
         let stream = context.default_stream();
         let (lut_cpu, lut_max_temp) = generate_blackbody_lut(
@@ -42,7 +42,7 @@ impl CudaRenderer {
         let kernel_source =
             fs::read_to_string(cuda_dir.join("kernel.cu")).context("Failed to read kernel.cu")?;
         let defines = build_cuda_defines(&config.kernel);
-        let full_source = format!("{}\n{}", defines, kernel_source);
+        let full_source = format!("{defines}\n{kernel_source}");
         let ptx_opts = CompileOptions {
             include_paths: vec![cuda_dir.to_string_lossy().to_string()],
             use_fast_math: Some(config.cuda.use_fast_math),
@@ -76,6 +76,7 @@ impl CudaRenderer {
             grid_dim: (grid_x, grid_y, 1),
         })
     }
+
     pub fn render(
         &mut self,
         cam_pos: [f32; 3],

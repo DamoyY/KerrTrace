@@ -39,18 +39,13 @@ pub struct ControlsConfig {
 pub struct RendererConfig {
     pub block_dim: [u32; 2],
     pub position_epsilon: f32,
-    pub spin: f32,
     pub save_first_frame: bool,
     pub first_frame_path: String,
 }
 #[derive(Debug, Deserialize, Clone)]
 pub struct HudConfig {
-    pub font_name: String,
     pub font_size: u32,
     pub margin: [u32; 2],
-    pub anchor_x: String,
-    pub anchor_y: String,
-    pub width: u32,
     pub color: [u8; 4],
 }
 #[derive(Debug, Deserialize, Clone)]
