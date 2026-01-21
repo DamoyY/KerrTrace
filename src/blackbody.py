@@ -2,10 +2,13 @@ import numpy as np
 import cupy as cp
 
 
-def generate_blackbody_lut():
-    size = 4096
-    max_temp = 1e5
-
+def generate_blackbody_lut(
+    size,
+    max_temp,
+    wavelength_start,
+    wavelength_end,
+    wavelength_step,
+):
     def gaussian(x, alpha, mu, sigma1, sigma2):
         sigma = np.where(x < mu, sigma1, sigma2)
         t = (x - mu) / sigma
@@ -47,7 +50,12 @@ def generate_blackbody_lut():
 
     temps = np.linspace(0, max_temp, size, dtype=np.float32)
     lut_data = np.zeros((size, 3), dtype=np.float32)
-    lambdas = np.arange(380, 721, 10, dtype=np.float32)
+    lambdas = np.arange(
+        wavelength_start,
+        wavelength_end + wavelength_step,
+        wavelength_step,
+        dtype=np.float32,
+    )
     xs, ys, zs = get_xyz_sensitivity(lambdas)
     for i, T in enumerate(temps):
         if T == 0:

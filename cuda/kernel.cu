@@ -47,7 +47,7 @@ extern "C"
         int y = blockIdx.y * blockDim.y + threadIdx.y;
         if (x >= width || y >= height)
             return;
-        const int SSAA_SAMPLES = 2;
+        const int SSAA_SAMPLES = CONFIG_SSAA_SAMPLES;
         const float INV_SAMPLES = 1.0f / (float)SSAA_SAMPLES;
         const float inv_w_2 = 2.0f / (float)width;
         const float inv_h_2 = 2.0f / (float)height;
@@ -90,7 +90,7 @@ extern "C"
             row_ray.y += step_y.y;
             row_ray.z += step_y.z;
         }
-        const float final_scale = 0.06f * (INV_SAMPLES * INV_SAMPLES);
+        const float final_scale = CONFIG_EXPOSURE_SCALE * (INV_SAMPLES * INV_SAMPLES);
         accumulated_color.x *= final_scale;
         accumulated_color.y *= final_scale;
         accumulated_color.z *= final_scale;

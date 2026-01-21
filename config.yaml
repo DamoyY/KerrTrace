@@ -1,0 +1,59 @@
+window:
+  width: 2100
+  height: 900
+  vsync: false
+camera:
+  position: [80.0, 6.0, 0.0]
+  yaw: -95.0
+  pitch: -4.0
+  fov: 10.0
+  pitch_limit: [-80.0, 80.0]
+  fov_limit: [1.0, 120.0]
+  zoom_speed: 5.0
+controls:
+  move_speed: 0.5
+  sprint_multiplier: 2.0
+  mouse_sensitivity: 0.06
+renderer:
+  block_dim: [16, 16]
+  position_epsilon: 0.00001
+  spin: 0.25
+  save_first_frame: true
+  first_frame_path: first_frame.png
+hud:
+  font_name: Consolas
+  font_size: 15
+  margin: [10, 10]
+  anchor_x: left
+  anchor_y: top
+  width: 600
+  color: [255, 255, 255, 255]
+blackbody:
+  lut_size: 4096
+  lut_max_temp: 100000.0
+  wavelength_start: 380.0
+  wavelength_end: 720.0
+  wavelength_step: 10.0
+cuda:
+  use_fast_math: true
+kernel:
+  ssaa_samples: 2
+  exposure_scale: 0.06
+  sky:
+    grid_divisions: 40
+    line_thickness: 0.0005
+    intensity: 5.0
+  black_hole:
+    spin: -0.45
+    mass: 0.5
+  disk:
+    outer_radius: 1000.0
+    temperature_scale: 30000.0
+  integrator:
+    initial_step: 1.0
+    tolerance: 0.0001
+    max_steps: 100
+    max_attempts: 50
+    transmittance_cutoff: 0.001
+    horizon_epsilon: 0.0000005
+    escape_radius: 1000.0

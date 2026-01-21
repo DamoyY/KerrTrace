@@ -9,35 +9,91 @@ from .camera import calculate_camera_basis
 from .blackbody import generate_blackbody_lut
 
 
+def _format_float(value):
+    text = f"{float(value):.10g}"
+    if "e" in text or "E" in text or "." in text:
+        return f"{text}f"
+    return f"{text}.0f"
+
+
+def _build_cuda_defines(kernel_config):
+    sky_config = kernel_config["sky"]
+    bh_config = kernel_config["black_hole"]
+    disk_config = kernel_config["disk"]
+    integrator_config = kernel_config["integrator"]
+    lines = [
+        f"#define CONFIG_SSAA_SAMPLES {int(kernel_config['ssaa_samples'])}",
+        f"#define CONFIG_EXPOSURE_SCALE {_format_float(kernel_config['exposure_scale'])}",
+        f"#define CONFIG_SKY_GRID_DIVISIONS {int(sky_config['grid_divisions'])}",
+        f"#define CONFIG_SKY_LINE_THICKNESS {_format_float(sky_config['line_thickness'])}",
+        f"#define CONFIG_SKY_INTENSITY {_format_float(sky_config['intensity'])}",
+        f"#define CONFIG_BH_SPIN {_format_float(bh_config['spin'])}",
+        f"#define CONFIG_BH_MASS {_format_float(bh_config['mass'])}",
+        f"#define CONFIG_DISK_OUTER_RADIUS {_format_float(disk_config['outer_radius'])}",
+        f"#define CONFIG_DISK_TEMPERATURE_SCALE {_format_float(disk_config['temperature_scale'])}",
+        f"#define CONFIG_INTEGRATOR_INITIAL_STEP {_format_float(integrator_config['initial_step'])}",
+        f"#define CONFIG_INTEGRATOR_TOLERANCE {_format_float(integrator_config['tolerance'])}",
+        f"#define CONFIG_INTEGRATOR_MAX_STEPS {int(integrator_config['max_steps'])}",
+        f"#define CONFIG_INTEGRATOR_MAX_ATTEMPTS {int(integrator_config['max_attempts'])}",
+        f"#define CONFIG_TRANSMITTANCE_CUTOFF {_format_float(integrator_config['transmittance_cutoff'])}",
+        f"#define CONFIG_HORIZON_EPSILON {_format_float(integrator_config['horizon_epsilon'])}",
+        f"#define CONFIG_ESCAPE_RADIUS {_format_float(integrator_config['escape_radius'])}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 class CudaRenderer(pyglet.window.Window):
-    def __init__(self, width=2100, height=900, current_dir="."):
-        super().__init__(width=width, height=height, vsync=False)
-        self.cam_pos = np.array([80.0, 6.0, 0.0], dtype=np.float32)
-        self.cam_yaw = -95.0
-        self.cam_pitch = -4.0
-        self.fov = 10.0
+    def __init__(self, config, current_dir):
+        window_config = config["window"]
+        camera_config = config["camera"]
+        control_config = config["controls"]
+        renderer_config = config["renderer"]
+        hud_config = config["hud"]
+        blackbody_config = config["blackbody"]
+        cuda_config = config["cuda"]
+        kernel_config = config["kernel"]
+        width = window_config["width"]
+        height = window_config["height"]
+        super().__init__(width=width, height=height, vsync=window_config["vsync"])
+        self.cam_pos = np.array(camera_config["position"], dtype=np.float32)
+        self.cam_yaw = camera_config["yaw"]
+        self.cam_pitch = camera_config["pitch"]
+        self.fov = camera_config["fov"]
         self.prev_cam_pos = np.copy(self.cam_pos)
         self.prev_cam_yaw = self.cam_yaw
         self.prev_cam_pitch = self.cam_pitch
         self.prev_fov = self.fov
         self.needs_redraw = True
-        self.move_speed = 0.5
-        self.mouse_sensitivity = 0.06
-        self.block_dim = (16, 16)
-        self.spin = 0.25
+        self.move_speed = control_config["move_speed"]
+        self.sprint_multiplier = control_config["sprint_multiplier"]
+        self.mouse_sensitivity = control_config["mouse_sensitivity"]
+        self.zoom_speed = camera_config["zoom_speed"]
+        self.pitch_limit = camera_config["pitch_limit"]
+        self.fov_limit = camera_config["fov_limit"]
+        self.position_epsilon = renderer_config["position_epsilon"]
+        self.block_dim = tuple(renderer_config["block_dim"])
+        self.spin = renderer_config["spin"]
         self.grid_x = (width + self.block_dim[0] - 1) // self.block_dim[0]
         self.grid_y = (height + self.block_dim[1] - 1) // self.block_dim[1]
         self.grid_dim = (self.grid_x, self.grid_y)
-        self.lut, self.lut_max_temp = generate_blackbody_lut()
+        self.lut, self.lut_max_temp = generate_blackbody_lut(
+            size=blackbody_config["lut_size"],
+            max_temp=blackbody_config["lut_max_temp"],
+            wavelength_start=blackbody_config["wavelength_start"],
+            wavelength_end=blackbody_config["wavelength_end"],
+            wavelength_step=blackbody_config["wavelength_step"],
+        )
         self.lut_size = self.lut.shape[0]
         cuda_dir = os.path.join(current_dir, "cuda")
-        compile_options = ("-use_fast_math", f"-I{cuda_dir}")
+        compile_options = [f"-I{cuda_dir}"]
+        if cuda_config["use_fast_math"]:
+            compile_options.append("-use_fast_math")
         with open(
             os.path.join(cuda_dir, "kernel.cu"), "r", encoding="utf-8"
         ) as f:
-            cuda_source = f.read()
+            cuda_source = _build_cuda_defines(kernel_config) + f.read()
             cuda_source += f"\n//{time.time()}\n"
-        self.module = cp.RawModule(code=cuda_source, options=compile_options)
+        self.module = cp.RawModule(code=cuda_source, options=tuple(compile_options))
         self.kernel = self.module.get_function("kernel")
         self.channels = 4
         self.image_gpu = cp.zeros(
@@ -54,18 +110,21 @@ class CudaRenderer(pyglet.window.Window):
         self.texture = pyglet.image.Texture.create(
             width, height, internalformat=pyglet.gl.GL_RGBA
         )
+        self.hud_margin = tuple(hud_config["margin"])
         self.info_label = pyglet.text.Label(
             "",
-            font_name="Consolas",
-            font_size=15,
-            x=10,
-            y=10,
-            anchor_x="left",
-            anchor_y="top",
-            width=600,
+            font_name=hud_config["font_name"],
+            font_size=hud_config["font_size"],
+            x=self.hud_margin[0],
+            y=self.hud_margin[1],
+            anchor_x=hud_config["anchor_x"],
+            anchor_y=hud_config["anchor_y"],
+            width=hud_config["width"],
             multiline=True,
-            color=(255, 255, 255, 255),
+            color=tuple(hud_config["color"]),
         )
+        self.save_first_frame = renderer_config["save_first_frame"]
+        self.first_frame_path = renderer_config["first_frame_path"]
         self.has_saved_first_frame = False
         self.fps_display = pyglet.window.FPSDisplay(window=self)
 
@@ -73,7 +132,9 @@ class CudaRenderer(pyglet.window.Window):
         if self.mouse_locked:
             self.cam_yaw += dx * self.mouse_sensitivity
             self.cam_pitch += dy * self.mouse_sensitivity
-            self.cam_pitch = max(-80.0, min(80.0, self.cam_pitch))
+            self.cam_pitch = max(
+                self.pitch_limit[0], min(self.pitch_limit[1], self.cam_pitch)
+            )
 
     def on_key_press(self, symbol, modifiers):
         if symbol == key.ESCAPE:
@@ -89,9 +150,8 @@ class CudaRenderer(pyglet.window.Window):
 
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
         if self.mouse_locked:
-            zoom_speed = 5.0
-            self.fov -= scroll_y * zoom_speed
-            self.fov = max(1.0, min(120.0, self.fov))
+            self.fov -= scroll_y * self.zoom_speed
+            self.fov = max(self.fov_limit[0], min(self.fov_limit[1], self.fov))
 
     def update_camera(self):
         fwd, rgt, _ = calculate_camera_basis(self.cam_yaw, self.cam_pitch)
@@ -99,7 +159,7 @@ class CudaRenderer(pyglet.window.Window):
         rgt_np = np.array(rgt)
         speed = self.move_speed
         if self.keys[key.LSHIFT]:
-            speed *= 2.0
+            speed *= self.sprint_multiplier
         if self.keys[key.W]:
             self.cam_pos += fwd_np * speed
         if self.keys[key.S]:
@@ -117,7 +177,7 @@ class CudaRenderer(pyglet.window.Window):
         self.clear()
         self.update_camera()
         position_changed = not np.allclose(
-            self.cam_pos, self.prev_cam_pos, atol=1e-5
+            self.cam_pos, self.prev_cam_pos, atol=self.position_epsilon
         )
         rotation_changed = (self.cam_yaw != self.prev_cam_yaw) or (
             self.cam_pitch != self.prev_cam_pitch
@@ -173,9 +233,9 @@ class CudaRenderer(pyglet.window.Window):
             )
             self.info_label.text = info_text
         self.texture.blit(0, 0)
-        self.info_label.y = self.height - 10
+        self.info_label.y = self.height - self.hud_margin[1]
         self.info_label.draw()
         self.fps_display.draw()
-        if not self.has_saved_first_frame:
-            self.texture.save("first_frame.png")
+        if self.save_first_frame and not self.has_saved_first_frame:
+            self.texture.save(self.first_frame_path)
             self.has_saved_first_frame = True

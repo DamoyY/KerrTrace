@@ -85,22 +85,22 @@ __device__ __forceinline__ float3 get_sky_color(float3 dir, float transmittance)
     const float PI = 3.14159265f;
     float theta_sky = atan2f(dir.z, dir.x);
     float phi_lat_sky = asinf(fminf(fmaxf(dir.y, -1.0f), 1.0f));
-    float grid_spacing = PI / 40.0f;
-    float line_thickness = 5e-4f;
+    float grid_spacing = PI / (float)CONFIG_SKY_GRID_DIVISIONS;
+    float line_thickness = CONFIG_SKY_LINE_THICKNESS;
     float d_theta = fmodf(fabsf(theta_sky), grid_spacing);
     float d_phi = fmodf(fabsf(phi_lat_sky), grid_spacing);
     bool is_grid = (d_theta < line_thickness || d_theta > (grid_spacing - line_thickness)) ||
                    (d_phi < line_thickness || d_phi > (grid_spacing - line_thickness)) ||
                    (fabsf(phi_lat_sky) < line_thickness * 3.0f);
 
-    float intensity = is_grid ? 5.0f * transmittance : 0.0f;
+    float intensity = is_grid ? CONFIG_SKY_INTENSITY * transmittance : 0.0f;
     return make_float3(intensity, intensity, intensity);
 }
 __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_size, float max_temp)
 {
     KerrParams p;
-    p.a = -0.45f;
-    p.M = 0.5f;
+    p.a = CONFIG_BH_SPIN;
+    p.M = CONFIG_BH_MASS;
     p.inv_M = 1.0f / p.M;
     p.aa = p.a * p.a;
     p.A_norm = p.a * p.inv_M;
@@ -138,8 +138,8 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
     s.pr = (v_r_loc < 0.0f ? -1.0f : 1.0f) * __fsqrt_rn(fmaxf(pr_sq, 0.0f));
     float3 color = make_float3(0.0f, 0.0f, 0.0f);
     float transmittance = 1.0f;
-    float h = 1.0f;
-    const float tol = 1e-4f;
+    float h = CONFIG_INTEGRATOR_INITIAL_STEP;
+    const float tol = CONFIG_INTEGRATOR_TOLERANCE;
     static const float a21 = 0.2f;
     static const float a31 = 3.0f / 40.0f, a32 = 9.0f / 40.0f;
     static const float a41 = 0.3f, a42 = -0.9f, a43 = 1.2f;
@@ -147,14 +147,14 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
     static const float a61 = 1631.0f / 55296.0f, a62 = 175.0f / 512.0f, a63 = 575.0f / 13824.0f, a64 = 44275.0f / 110592.0f, a65 = 253.0f / 4096.0f;
     static const float b1 = 37.0f / 378.0f, b3 = 250.0f / 621.0f, b4 = 125.0f / 594.0f, b6 = 512.0f / 1771.0f;
     static const float dc1 = 37.0f / 378.0f - 2825.0f / 27648.0f, dc3 = 250.0f / 621.0f - 18575.0f / 48384.0f, dc4 = 125.0f / 594.0f - 13525.0f / 55296.0f, dc5 = -277.0f / 14336.0f, dc6 = 512.0f / 1771.0f - 0.25f;
-    for (int i = 0; i < 100 && transmittance > 1e-3f; i++)
+    for (int i = 0; i < CONFIG_INTEGRATOR_MAX_STEPS && transmittance > CONFIG_TRANSMITTANCE_CUTOFF; i++)
     {
         RayDerivs k1, k2, k3, k4, k5, k6;
         RayState next_s;
         float error;
         int attempts = 0;
         bool accepted = false;
-        while (!accepted && attempts < 50)
+        while (!accepted && attempts < CONFIG_INTEGRATOR_MAX_ATTEMPTS)
         {
             k1 = get_derivs(s, p);
             k2 = get_derivs({s.r + h * a21 * k1.dr, s.theta + h * a21 * k1.dth, 0, s.pr + h * a21 * k1.dpr, s.pth + h * a21 * k1.dpth, s.pph}, p);
@@ -180,7 +180,7 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
         }
         float prev_r = s.r, prev_th = s.theta;
         s = next_s;
-        if (s.r < p.rh + 5e-7f)
+        if (s.r < p.rh + CONFIG_HORIZON_EPSILON)
             break;
         if ((prev_th < 1.570796327f && s.theta >= 1.570796327f) || (prev_th > 1.570796327f && s.theta <= 1.570796327f))
         {
@@ -188,14 +188,14 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
             float t = (1.570796327f - prev_th) / (s.theta - prev_th + 1e-8f);
             float t2 = t * t, t3 = t2 * t;
             float r_hit = (2 * t3 - 3 * t2 + 1) * prev_r + (t3 - 2 * t2 + t) * (k1.dr * h) + (-2 * t3 + 3 * t2) * s.r + (t3 - t2) * (ke.dr * h);
-            if (r_hit >= p.disk_inner && r_hit <= 1000.0f)
+            if (r_hit >= p.disk_inner && r_hit <= CONFIG_DISK_OUTER_RADIUS)
             {
                 float sqrt_M = __fsqrt_rn(p.M), r_sqrt = __fsqrt_rn(r_hit);
                 float disc_denom = 1.0f - 3.0f * p.M / r_hit + 2.0f * p.a * sqrt_M / (r_hit * r_sqrt);
                 if (disc_denom > 1e-8f)
                 {
                     float g = 1.0f / (rsqrtf(disc_denom) * (1.0f - (-sqrt_M / (r_hit * r_sqrt + p.a * sqrt_M)) * s.pph));
-                    float T = 3.0e4f * __fsqrt_rn(__fsqrt_rn(calc_novikov_thorne_factor(r_hit, p.A_norm, p.disk_inner, p.inv_M))) * g;
+                    float T = CONFIG_DISK_TEMPERATURE_SCALE * __fsqrt_rn(__fsqrt_rn(calc_novikov_thorne_factor(r_hit, p.A_norm, p.disk_inner, p.inv_M))) * g;
                     if (isfinite(T) && T > 0.0f)
                     {
                         float3 d_col = fetch_color_from_lut(fminf(T, max_temp), lut, lut_size, max_temp);
@@ -208,7 +208,7 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
                 }
             }
         }
-        if (s.r > 1000.0f)
+        if (s.r > CONFIG_ESCAPE_RADIUS)
         {
             float sn, cn, spn, cpn;
             __sincosf(s.theta, &sn, &cn);
