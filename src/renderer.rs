@@ -1,4 +1,4 @@
-use std::{fs, path::Path, sync::Arc};
+use std::{fmt::Display, fs, path::Path, sync::Arc};
 
 use anyhow::{Context, Result};
 use cudarc::{
@@ -21,6 +21,12 @@ pub struct CudaRenderer {
     height: u32,
     block_dim: (u32, u32, u32),
     grid_dim: (u32, u32, u32),
+}
+
+macro_rules! push_vec3_args {
+    ($builder:expr, $v:expr) => {
+        $builder.arg(&$v[0]).arg(&$v[1]).arg(&$v[2])
+    };
 }
 impl CudaRenderer {
     pub fn new(config: &Config, cuda_dir: &Path) -> Result<Self> {
@@ -90,41 +96,21 @@ impl CudaRenderer {
         };
         let width = i32::try_from(self.width).context("Window width exceeds i32 range")?;
         let height = i32::try_from(self.height).context("Window height exceeds i32 range")?;
-        let cam_x = cam_pos[0];
-        let cam_y = cam_pos[1];
-        let cam_z = cam_pos[2];
-        let fwd_x = fwd[0];
-        let fwd_y = fwd[1];
-        let fwd_z = fwd[2];
-        let rgt_x = rgt[0];
-        let rgt_y = rgt[1];
-        let rgt_z = rgt[2];
-        let up_x = up[0];
-        let up_y = up[1];
-        let up_z = up[2];
-        let lut_size = self.lut_size;
-        let lut_max_temp = self.lut_max_temp;
         unsafe {
-            self.stream
+            let launch = self
+                .stream
                 .launch_builder(&self.kernel)
                 .arg(&mut self.image_gpu)
                 .arg(&width)
-                .arg(&height)
-                .arg(&cam_x)
-                .arg(&cam_y)
-                .arg(&cam_z)
-                .arg(&fwd_x)
-                .arg(&fwd_y)
-                .arg(&fwd_z)
-                .arg(&rgt_x)
-                .arg(&rgt_y)
-                .arg(&rgt_z)
-                .arg(&up_x)
-                .arg(&up_y)
-                .arg(&up_z)
+                .arg(&height);
+            let launch = push_vec3_args!(launch, cam_pos);
+            let launch = push_vec3_args!(launch, fwd);
+            let launch = push_vec3_args!(launch, rgt);
+            let launch = push_vec3_args!(launch, up);
+            launch
                 .arg(&self.lut)
-                .arg(&lut_size)
-                .arg(&lut_max_temp)
+                .arg(&self.lut_size)
+                .arg(&self.lut_max_temp)
                 .arg(&fov_scale)
                 .launch(launch_config)
                 .context("Failed to launch kernel")?;
@@ -136,71 +122,78 @@ impl CudaRenderer {
         Ok(host_image)
     }
 }
+
+fn push_define(lines: &mut Vec<String>, key: &str, value: impl Display) {
+    lines.push(format!("#define {key} {value}"));
+}
+
+fn push_define_f32(lines: &mut Vec<String>, key: &str, value: f32) {
+    lines.push(format!("#define {key} {:.10}", value));
+}
+
 fn build_cuda_defines(config: &KernelConfig) -> String {
-    let mut lines = Vec::new();
-    lines.push(format!(
-        "#define CONFIG_SSAA_SAMPLES {}",
-        config.ssaa_samples
-    ));
-    lines.push(format!(
-        "#define CONFIG_EXPOSURE_SCALE {:.10}",
-        config.exposure_scale
-    ));
-    lines.push(format!(
-        "#define CONFIG_SKY_GRID_DIVISIONS {}",
-        config.sky.grid_divisions
-    ));
-    lines.push(format!(
-        "#define CONFIG_SKY_LINE_THICKNESS {:.10}",
-        config.sky.line_thickness
-    ));
-    lines.push(format!(
-        "#define CONFIG_SKY_INTENSITY {:.10}",
-        config.sky.intensity
-    ));
-    lines.push(format!(
-        "#define CONFIG_BH_SPIN {:.10}",
-        config.black_hole.spin
-    ));
-    lines.push(format!(
-        "#define CONFIG_BH_MASS {:.10}",
-        config.black_hole.mass
-    ));
-    lines.push(format!(
-        "#define CONFIG_DISK_OUTER_RADIUS {:.10}",
-        config.disk.outer_radius
-    ));
-    lines.push(format!(
-        "#define CONFIG_DISK_TEMPERATURE_SCALE {:.10}",
-        config.disk.temperature_scale
-    ));
-    lines.push(format!(
-        "#define CONFIG_INTEGRATOR_INITIAL_STEP {:.10}",
-        config.integrator.initial_step
-    ));
-    lines.push(format!(
-        "#define CONFIG_INTEGRATOR_TOLERANCE {:.10}",
-        config.integrator.tolerance
-    ));
-    lines.push(format!(
-        "#define CONFIG_INTEGRATOR_MAX_STEPS {}",
-        config.integrator.max_steps
-    ));
-    lines.push(format!(
-        "#define CONFIG_INTEGRATOR_MAX_ATTEMPTS {}",
-        config.integrator.max_attempts
-    ));
-    lines.push(format!(
-        "#define CONFIG_TRANSMITTANCE_CUTOFF {:.10}",
-        config.integrator.transmittance_cutoff
-    ));
-    lines.push(format!(
-        "#define CONFIG_HORIZON_EPSILON {:.10}",
-        config.integrator.horizon_epsilon
-    ));
-    lines.push(format!(
-        "#define CONFIG_ESCAPE_RADIUS {:.10}",
-        config.integrator.escape_radius
-    ));
-    lines.join("\n") + "\n"
+    let mut lines = Vec::with_capacity(15);
+    push_define(&mut lines, "CONFIG_SSAA_SAMPLES", config.ssaa_samples);
+    push_define_f32(
+        &mut lines,
+        "CONFIG_EXPOSURE_SCALE",
+        config.exposure_scale,
+    );
+    push_define(&mut lines, "CONFIG_SKY_GRID_DIVISIONS", config.sky.grid_divisions);
+    push_define_f32(
+        &mut lines,
+        "CONFIG_SKY_LINE_THICKNESS",
+        config.sky.line_thickness,
+    );
+    push_define_f32(&mut lines, "CONFIG_SKY_INTENSITY", config.sky.intensity);
+    push_define_f32(&mut lines, "CONFIG_BH_SPIN", config.black_hole.spin);
+    push_define_f32(&mut lines, "CONFIG_BH_MASS", config.black_hole.mass);
+    push_define_f32(
+        &mut lines,
+        "CONFIG_DISK_OUTER_RADIUS",
+        config.disk.outer_radius,
+    );
+    push_define_f32(
+        &mut lines,
+        "CONFIG_DISK_TEMPERATURE_SCALE",
+        config.disk.temperature_scale,
+    );
+    push_define_f32(
+        &mut lines,
+        "CONFIG_INTEGRATOR_INITIAL_STEP",
+        config.integrator.initial_step,
+    );
+    push_define_f32(
+        &mut lines,
+        "CONFIG_INTEGRATOR_TOLERANCE",
+        config.integrator.tolerance,
+    );
+    push_define(
+        &mut lines,
+        "CONFIG_INTEGRATOR_MAX_STEPS",
+        config.integrator.max_steps,
+    );
+    push_define(
+        &mut lines,
+        "CONFIG_INTEGRATOR_MAX_ATTEMPTS",
+        config.integrator.max_attempts,
+    );
+    push_define_f32(
+        &mut lines,
+        "CONFIG_TRANSMITTANCE_CUTOFF",
+        config.integrator.transmittance_cutoff,
+    );
+    push_define_f32(
+        &mut lines,
+        "CONFIG_HORIZON_EPSILON",
+        config.integrator.horizon_epsilon,
+    );
+    push_define_f32(
+        &mut lines,
+        "CONFIG_ESCAPE_RADIUS",
+        config.integrator.escape_radius,
+    );
+    let mut output = lines.join("\n");
+    output.push('\n');
+    output
 }
