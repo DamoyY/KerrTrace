@@ -96,16 +96,8 @@ __device__ __forceinline__ float3 get_sky_color(float3 dir, float transmittance)
     float intensity = is_grid ? CONFIG_SKY_INTENSITY * transmittance : 0.0f;
     return make_float3(intensity, intensity, intensity);
 }
-__device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_size, float max_temp)
+__device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, const KerrParams &p, cudaTextureObject_t lut_tex, int lut_size, float max_temp)
 {
-    KerrParams p;
-    p.a = CONFIG_BH_SPIN;
-    p.M = CONFIG_BH_MASS;
-    p.inv_M = 1.0f / p.M;
-    p.aa = p.a * p.a;
-    p.A_norm = p.a * p.inv_M;
-    p.rh = p.M + __fsqrt_rn(fmaxf(p.M * p.M - p.aa, 0.0f));
-    p.disk_inner = calc_isco(p.A_norm, true, p.M);
     float3 ray_n = normalize(ray_dir);
     float r_init = length(cam_pos);
     float th_init = acosf(__fdividef(cam_pos.y, r_init));
@@ -206,7 +198,7 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, float *lut, int lut_
                     float T = CONFIG_DISK_TEMPERATURE_SCALE * __fsqrt_rn(__fsqrt_rn(calc_novikov_thorne_factor(r_hit, p.A_norm, p.disk_inner, p.inv_M))) * g;
                     if (isfinite(T) && T > 0.0f)
                     {
-                        float3 d_col = fetch_color_from_lut(fminf(T, max_temp), lut, lut_size, max_temp);
+                        float3 d_col = fetch_color_from_lut(fminf(T, max_temp), lut_tex, lut_size, max_temp);
                         float alpha = (0.2126f * d_col.x + 0.7152f * d_col.y + 0.0722f * d_col.z) / (1.0f + (0.2126f * d_col.x + 0.7152f * d_col.y + 0.0722f * d_col.z));
                         color.x += d_col.x * alpha * transmittance;
                         color.y += d_col.y * alpha * transmittance;

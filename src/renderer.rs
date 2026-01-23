@@ -1,24 +1,67 @@
-use std::{fmt::Display, fs, path::Path, sync::Arc};
+use std::{ffi::c_void, fmt::Display, fs, mem, path::Path, ptr, sync::Arc};
 
 use anyhow::{Context, Result, anyhow};
 use cudarc::{
-    driver::{CudaContext, CudaFunction, CudaSlice, CudaStream, LaunchConfig, PushKernelArg},
+    driver::{
+        CudaContext, CudaFunction, CudaSlice, CudaStream, DeviceRepr, LaunchConfig, PushKernelArg,
+    },
     nvrtc::{CompileOptions, compile_ptx_with_opts},
+    runtime::{result::RuntimeError, sys as cuda_sys},
 };
 use log::error;
 
 use crate::{Config, KernelConfig};
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct KerrParams {
+    a: f32,
+    m: f32,
+    aa: f32,
+    inv_m: f32,
+    a_norm: f32,
+    rh: f32,
+    disk_inner: f32,
+}
+unsafe impl DeviceRepr for KerrParams {}
+struct CudaTextureLut {
+    texture: cuda_sys::cudaTextureObject_t,
+    array: cuda_sys::cudaArray_t,
+}
+impl Drop for CudaTextureLut {
+    fn drop(&mut self) {
+        let mut errors = Vec::new();
+        unsafe {
+            if self.texture != 0 {
+                let err = cuda_sys::cudaDestroyTextureObject(self.texture);
+                if err != cuda_sys::cudaError_t::cudaSuccess {
+                    errors.push(format!(
+                        "cudaDestroyTextureObject failed: {}",
+                        RuntimeError(err)
+                    ));
+                }
+            }
+            if !self.array.is_null() {
+                let err = cuda_sys::cudaFreeArray(self.array);
+                if err != cuda_sys::cudaError_t::cudaSuccess {
+                    errors.push(format!("cudaFreeArray failed: {}", RuntimeError(err)));
+                }
+            }
+        }
+        assert!(errors.is_empty(), "{}", errors.join("; "));
+    }
+}
 pub struct CudaRenderer {
     stream: Arc<CudaStream>,
     kernel: CudaFunction,
     image_gpu: CudaSlice<u8>,
-    lut: CudaSlice<f32>,
+    lut_texture: CudaTextureLut,
     lut_size: i32,
     lut_max_temp: f32,
     width: u32,
     height: u32,
     block_dim: (u32, u32, u32),
     grid_dim: (u32, u32, u32),
+    kerr_params: KerrParams,
 }
 impl CudaRenderer {
     pub fn new(config: &Config, cuda_dir: &Path) -> Result<Self> {
@@ -36,9 +79,8 @@ impl CudaRenderer {
         .context("生成黑体查找表失败")?;
         let lut_size =
             i32::try_from(config.blackbody.lut_size).context("LUT size exceeds i32 range")?;
-        let lut = stream
-            .clone_htod(&lut_cpu)
-            .context("复制 LUT 到 GPU 失败")?;
+        let lut_texture = create_lut_texture(&stream, &lut_cpu, config.blackbody.lut_size)
+            .context("创建 LUT 纹理失败")?;
         let kernel_source =
             fs::read_to_string(cuda_dir.join("kernel.cu")).context("读取 kernel.cu 失败")?;
         let defines = build_cuda_defines(&config.kernel);
@@ -59,17 +101,19 @@ impl CudaRenderer {
         let block_y = config.renderer.block_dim[1];
         let grid_x = u_width.div_ceil(block_x);
         let grid_y = u_height.div_ceil(block_y);
+        let kerr_params = build_kerr_params(&config.kernel)?;
         Ok(Self {
             stream,
             kernel,
             image_gpu,
-            lut,
+            lut_texture,
             lut_size,
             lut_max_temp,
             width: u_width,
             height: u_height,
             block_dim: (block_x, block_y, 1),
             grid_dim: (grid_x, grid_y, 1),
+            kerr_params,
         })
     }
 
@@ -98,7 +142,8 @@ impl CudaRenderer {
                 launch.arg(&v[0]).arg(&v[1]).arg(&v[2]);
             }
             launch
-                .arg(&self.lut)
+                .arg(&self.kerr_params)
+                .arg(&self.lut_texture.texture)
                 .arg(&self.lut_size)
                 .arg(&self.lut_max_temp)
                 .arg(&fov_scale)
@@ -111,6 +156,155 @@ impl CudaRenderer {
             .context("Failed to copy image back")?;
         Ok(host_image)
     }
+}
+fn cuda_runtime_result(err: cuda_sys::cudaError_t, context: &str) -> Result<()> {
+    err.result().map_err(|e| anyhow!("{context}: {e}"))
+}
+fn create_lut_texture(
+    stream: &CudaStream,
+    lut_data: &[f32],
+    lut_size: usize,
+) -> Result<CudaTextureLut> {
+    if lut_size == 0 {
+        return Err(anyhow!("LUT size 为 0，无法创建纹理"));
+    }
+    if lut_data.len() != lut_size * 4 {
+        return Err(anyhow!(
+            "LUT 数据长度不匹配: 期望 {}, 实际 {}",
+            lut_size * 4,
+            lut_data.len()
+        ));
+    }
+    let device = i32::try_from(stream.context().ordinal())
+        .context("CUDA device ordinal exceeds i32 range")?;
+    cuda_runtime_result(
+        unsafe { cuda_sys::cudaSetDevice(device) },
+        "设置 CUDA device 失败",
+    )?;
+    let channel_desc = unsafe {
+        cuda_sys::cudaCreateChannelDesc(
+            32,
+            32,
+            32,
+            32,
+            cuda_sys::cudaChannelFormatKind::cudaChannelFormatKindFloat,
+        )
+    };
+    let mut array: cuda_sys::cudaArray_t = ptr::null_mut();
+    cuda_runtime_result(
+        unsafe {
+            cuda_sys::cudaMallocArray(
+                &raw mut array,
+                &raw const channel_desc,
+                lut_size,
+                1,
+                cuda_sys::cudaArrayDefault,
+            )
+        },
+        "cudaMallocArray 失败",
+    )?;
+    let bytes = lut_data
+        .len()
+        .checked_mul(mem::size_of::<f32>())
+        .context("LUT 数据大小溢出")?;
+    let copy_result = cuda_runtime_result(
+        unsafe {
+            cuda_sys::cudaMemcpyToArray(
+                array,
+                0,
+                0,
+                lut_data.as_ptr().cast::<c_void>(),
+                bytes,
+                cuda_sys::cudaMemcpyKind::cudaMemcpyHostToDevice,
+            )
+        },
+        "复制 LUT 到 CUDA 数组失败",
+    );
+    if let Err(err) = copy_result {
+        let free_result = cuda_runtime_result(
+            unsafe { cuda_sys::cudaFreeArray(array) },
+            "释放 LUT 数组失败",
+        );
+        if let Err(free_err) = free_result {
+            return Err(anyhow!("{err}; {free_err}"));
+        }
+        return Err(err);
+    }
+    let mut res_desc: cuda_sys::cudaResourceDesc = unsafe { mem::zeroed() };
+    res_desc.resType = cuda_sys::cudaResourceType::cudaResourceTypeArray;
+    res_desc.res.array = cuda_sys::cudaResourceDesc__bindgen_ty_1__bindgen_ty_1 { array };
+    let mut tex_desc: cuda_sys::cudaTextureDesc = unsafe { mem::zeroed() };
+    tex_desc.addressMode = [
+        cuda_sys::cudaTextureAddressMode::cudaAddressModeClamp,
+        cuda_sys::cudaTextureAddressMode::cudaAddressModeClamp,
+        cuda_sys::cudaTextureAddressMode::cudaAddressModeClamp,
+    ];
+    tex_desc.filterMode = cuda_sys::cudaTextureFilterMode::cudaFilterModeLinear;
+    tex_desc.readMode = cuda_sys::cudaTextureReadMode::cudaReadModeElementType;
+    tex_desc.normalizedCoords = 1;
+    let mut texture: cuda_sys::cudaTextureObject_t = 0;
+    let create_result = cuda_runtime_result(
+        unsafe {
+            cuda_sys::cudaCreateTextureObject(
+                &raw mut texture,
+                &raw const res_desc,
+                &raw const tex_desc,
+                ptr::null(),
+            )
+        },
+        "cudaCreateTextureObject 失败",
+    );
+    if let Err(err) = create_result {
+        let free_result = cuda_runtime_result(
+            unsafe { cuda_sys::cudaFreeArray(array) },
+            "释放 LUT 数组失败",
+        );
+        if let Err(free_err) = free_result {
+            return Err(anyhow!("{err}; {free_err}"));
+        }
+        return Err(err);
+    }
+    Ok(CudaTextureLut { texture, array })
+}
+fn calc_isco(a_norm: f32, prograde: bool, mass: f32) -> f32 {
+    let aa = a_norm * a_norm;
+    let z1 = (1.0 - aa)
+        .cbrt()
+        .mul_add((1.0 + a_norm).cbrt() + (1.0 - a_norm).cbrt(), 1.0);
+    let z2 = (3.0f32).mul_add(aa, z1 * z1).sqrt();
+    let sign = if prograde { -1.0 } else { 1.0 };
+    let term_inside = (3.0 - z1) * (2.0f32.mul_add(z2, 3.0 + z1));
+    mass * (3.0 + z2 + sign * term_inside.max(0.0).sqrt())
+}
+fn build_kerr_params(config: &KernelConfig) -> Result<KerrParams> {
+    let spin = config.black_hole.spin;
+    let mass = config.black_hole.mass;
+    if !spin.is_finite() {
+        return Err(anyhow!("黑洞自旋不是有限值: {spin}"));
+    }
+    if !mass.is_finite() {
+        return Err(anyhow!("黑洞质量不是有限值: {mass}"));
+    }
+    if mass == 0.0 {
+        return Err(anyhow!("黑洞质量不能为 0"));
+    }
+    let inv_m = 1.0 / mass;
+    let aa = spin * spin;
+    let a_norm = spin * inv_m;
+    let rh = mass + mass.mul_add(mass, -aa).max(0.0).sqrt();
+    let disk_inner = calc_isco(a_norm, true, mass);
+    if !rh.is_finite() || !disk_inner.is_finite() {
+        return Err(anyhow!("Kerr 参数计算产生了非有限值"));
+    }
+    Ok(KerrParams {
+        a: spin,
+        m: mass,
+        aa,
+        inv_m,
+        a_norm,
+        rh,
+        disk_inner,
+    })
 }
 fn push_define(lines: &mut Vec<String>, key: &str, value: impl Display) {
     lines.push(format!("#define {key} {value}"));
@@ -136,8 +330,6 @@ fn build_cuda_defines(config: &KernelConfig) -> String {
         ("CONFIG_EXPOSURE_SCALE", config.exposure_scale),
         ("CONFIG_SKY_LINE_THICKNESS", config.sky.line_thickness),
         ("CONFIG_SKY_INTENSITY", config.sky.intensity),
-        ("CONFIG_BH_SPIN", config.black_hole.spin),
-        ("CONFIG_BH_MASS", config.black_hole.mass),
         ("CONFIG_DISK_OUTER_RADIUS", config.disk.outer_radius),
         (
             "CONFIG_DISK_TEMPERATURE_SCALE",
@@ -177,7 +369,7 @@ fn generate_blackbody_lut(
         error!("波长步进无效: {wavelength_step}");
         return Err(anyhow!("波长步进必须为正数且有限"));
     }
-    let mut lut_data = Vec::with_capacity(size * 3);
+    let mut lut_data = Vec::with_capacity(size * 4);
     let denom_usize = size - 1;
     let denom_u32 =
         u32::try_from(denom_usize).map_err(|_| anyhow!("黑体查找表尺寸超出 u32 范围: {size}"))?;
@@ -206,6 +398,7 @@ fn generate_blackbody_lut(
             lut_data.push(0.0);
             lut_data.push(0.0);
             lut_data.push(0.0);
+            lut_data.push(0.0);
             continue;
         }
         let intensities = planck_law(&lambdas, t);
@@ -221,6 +414,7 @@ fn generate_blackbody_lut(
         lut_data.push(r);
         lut_data.push(g);
         lut_data.push(b);
+        lut_data.push(0.0);
     }
     Ok((lut_data, max_temp))
 }

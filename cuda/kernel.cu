@@ -1,17 +1,10 @@
-__device__ __forceinline__ float3 fetch_color_from_lut(float T, const float *__restrict__ lut, int lut_size, float max_temp)
+__device__ __forceinline__ float3 fetch_color_from_lut(float T, cudaTextureObject_t lut_tex, int lut_size, float max_temp)
 {
-    float t_norm = T / max_temp;
+    float t_norm = fminf(fmaxf(T, 0.0f), max_temp) / max_temp;
     float pos = t_norm * (float)(lut_size - 1);
-    int idx = (int)pos;
-    float frac = pos - (float)idx;
-    int base_idx = idx * 3;
-    float3 c1 = make_float3(__ldg(&lut[base_idx]), __ldg(&lut[base_idx + 1]), __ldg(&lut[base_idx + 2]));
-    float3 c2 = make_float3(__ldg(&lut[base_idx + 3]), __ldg(&lut[base_idx + 4]), __ldg(&lut[base_idx + 5]));
-    float3 res;
-    res.x = c1.x + frac * (c2.x - c1.x);
-    res.y = c1.y + frac * (c2.y - c1.y);
-    res.z = c1.z + frac * (c2.z - c1.z);
-    return res;
+    float u = (pos + 0.5f) / (float)lut_size;
+    float4 c = tex1D<float4>(lut_tex, u);
+    return make_float3(c.x, c.y, c.z);
 }
 __device__ __forceinline__ float3 aces_tone_map(float3 x)
 {
@@ -40,7 +33,8 @@ extern "C"
         float fwd_x, float fwd_y, float fwd_z,
         float rgt_x, float rgt_y, float rgt_z,
         float up_x, float up_y, float up_z,
-        float *__restrict__ lut, int lut_size, float max_temp,
+        KerrParams kerr,
+        cudaTextureObject_t lut_tex, int lut_size, float max_temp,
         float fov_scale)
     {
         int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -78,7 +72,7 @@ extern "C"
 #pragma unroll
             for (int sx = 0; sx < SSAA_SAMPLES; sx++)
             {
-                float3 sample_color = trace_ray(cam_pos, current_ray, lut, lut_size, max_temp);
+                float3 sample_color = trace_ray(cam_pos, current_ray, kerr, lut_tex, lut_size, max_temp);
                 accumulated_color.x += sample_color.x;
                 accumulated_color.y += sample_color.y;
                 accumulated_color.z += sample_color.z;
