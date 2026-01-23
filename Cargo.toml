@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 anyhow = "*"
-bytemuck = { version = "*", features = ["derive"] }
 cudarc = { version = "*", features = ["cuda-version-from-build-system"] }
 env_logger = "*"
 glam = "*"
