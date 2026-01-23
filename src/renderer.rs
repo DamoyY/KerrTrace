@@ -62,7 +62,6 @@ pub struct CudaRenderer {
     height: u32,
     block_dim: (u32, u32, u32),
     grid_dim: (u32, u32, u32),
-    kerr_params: KerrParams,
 }
 impl CudaRenderer {
     pub fn new(config: &Config, cuda_dir: &Path) -> Result<Self> {
@@ -103,6 +102,17 @@ impl CudaRenderer {
         let grid_x = u_width.div_ceil(block_x);
         let grid_y = u_height.div_ceil(block_y);
         let kerr_params = build_kerr_params(&config.kernel)?;
+        let mut params_symbol = module
+            .get_global("c_params", &stream)
+            .context("获取常量内存符号 c_params 失败")?;
+        let mut params_view = unsafe {
+            params_symbol
+                .transmute_mut::<KerrParams>(1)
+                .ok_or_else(|| anyhow!("c_params 常量内存大小不足"))?
+        };
+        stream
+            .memcpy_htod(std::slice::from_ref(&kerr_params), &mut params_view)
+            .context("复制 Kerr 参数到常量内存失败")?;
         Ok(Self {
             stream,
             kernel,
@@ -114,7 +124,6 @@ impl CudaRenderer {
             height: u_height,
             block_dim: (block_x, block_y, 1),
             grid_dim: (grid_x, grid_y, 1),
-            kerr_params,
         })
     }
 
@@ -143,7 +152,6 @@ impl CudaRenderer {
                 launch.arg(&v[0]).arg(&v[1]).arg(&v[2]);
             }
             launch
-                .arg(&self.kerr_params)
                 .arg(&self.lut_texture.texture)
                 .arg(&self.lut_size)
                 .arg(&self.lut_max_temp)

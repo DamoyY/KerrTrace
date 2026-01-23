@@ -4,6 +4,7 @@ struct KerrParams
 {
     float a, M, aa, inv_M, A_norm, rh, disk_inner;
 };
+__constant__ KerrParams c_params;
 struct RayState
 {
     float r, theta, phi, pr, pth, pph;
@@ -62,8 +63,9 @@ __device__ float calc_novikov_thorne_factor(float r, float A_norm, float r_isco,
     float geometric_denom = R_norm * (R_norm * x - 3.0f * x + 2.0f * A_norm);
     return geometric_denom < 1e-8f ? 0.0f : fmaxf(__fdividef(Q, geometric_denom), 0.0f);
 }
-__device__ __forceinline__ RayDerivs get_derivs(const RayState &s, const KerrParams &p)
+__device__ __forceinline__ RayDerivs get_derivs(const RayState &s)
 {
+    const KerrParams &p = c_params;
     float sin_th, cos_th;
     __sincosf(s.theta, &sin_th, &cos_th);
     float s2 = fmaxf(sin_th * sin_th, 1e-8f);
@@ -96,8 +98,9 @@ __device__ __forceinline__ float3 get_sky_color(float3 dir, float transmittance)
     float intensity = is_grid ? CONFIG_SKY_INTENSITY * transmittance : 0.0f;
     return make_float3(intensity, intensity, intensity);
 }
-__device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, const KerrParams &p, cudaTextureObject_t lut_tex, int lut_size, float max_temp)
+__device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, cudaTextureObject_t lut_tex, int lut_size, float max_temp)
 {
+    const KerrParams &p = c_params;
     float3 ray_n = normalize(ray_dir);
     float r_init = length(cam_pos);
     float th_init = acosf(__fdividef(cam_pos.y, r_init));
@@ -156,12 +159,12 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, const KerrParams &p,
         bool accepted = false;
         while (!accepted && attempts < CONFIG_INTEGRATOR_MAX_ATTEMPTS)
         {
-            k1 = get_derivs(s, p);
-            k2 = get_derivs({s.r + h * a21 * k1.dr, s.theta + h * a21 * k1.dth, 0, s.pr + h * a21 * k1.dpr, s.pth + h * a21 * k1.dpth, s.pph}, p);
-            k3 = get_derivs({s.r + h * (a31 * k1.dr + a32 * k2.dr), s.theta + h * (a31 * k1.dth + a32 * k2.dth), 0, s.pr + h * (a31 * k1.dpr + a32 * k2.dpr), s.pth + h * (a31 * k1.dpth + a32 * k2.dpth), s.pph}, p);
-            k4 = get_derivs({s.r + h * (a41 * k1.dr + a42 * k2.dr + a43 * k3.dr), s.theta + h * (a41 * k1.dth + a42 * k2.dth + a43 * k3.dth), 0, s.pr + h * (a41 * k1.dpr + a42 * k2.dpr + a43 * k3.dpr), s.pth + h * (a41 * k1.dpth + a42 * k2.dpth + a43 * k3.dpth), s.pph}, p);
-            k5 = get_derivs({s.r + h * (a51 * k1.dr + a52 * k2.dr + a53 * k3.dr + a54 * k4.dr), s.theta + h * (a51 * k1.dth + a52 * k2.dth + a53 * k3.dth + a54 * k4.dth), 0, s.pr + h * (a51 * k1.dpr + a52 * k2.dpr + a53 * k3.dpr + a54 * k4.dpr), s.pth + h * (a51 * k1.dpth + a52 * k2.dpth + a53 * k3.dpth + a54 * k4.dpth), s.pph}, p);
-            k6 = get_derivs({s.r + h * (a61 * k1.dr + a62 * k2.dr + a63 * k3.dr + a64 * k4.dr + a65 * k5.dr), s.theta + h * (a61 * k1.dth + a62 * k2.dth + a63 * k3.dth + a64 * k4.dth + a65 * k5.dth), 0, s.pr + h * (a61 * k1.dpr + a62 * k2.dpr + a63 * k3.dpr + a64 * k4.dpr + a65 * k5.dpr), s.pth + h * (a61 * k1.dpth + a62 * k2.dpth + a63 * k3.dpth + a64 * k4.dpth + a65 * k5.dpth), s.pph}, p);
+            k1 = get_derivs(s);
+            k2 = get_derivs({s.r + h * a21 * k1.dr, s.theta + h * a21 * k1.dth, 0, s.pr + h * a21 * k1.dpr, s.pth + h * a21 * k1.dpth, s.pph});
+            k3 = get_derivs({s.r + h * (a31 * k1.dr + a32 * k2.dr), s.theta + h * (a31 * k1.dth + a32 * k2.dth), 0, s.pr + h * (a31 * k1.dpr + a32 * k2.dpr), s.pth + h * (a31 * k1.dpth + a32 * k2.dpth), s.pph});
+            k4 = get_derivs({s.r + h * (a41 * k1.dr + a42 * k2.dr + a43 * k3.dr), s.theta + h * (a41 * k1.dth + a42 * k2.dth + a43 * k3.dth), 0, s.pr + h * (a41 * k1.dpr + a42 * k2.dpr + a43 * k3.dpr), s.pth + h * (a41 * k1.dpth + a42 * k2.dpth + a43 * k3.dpth), s.pph});
+            k5 = get_derivs({s.r + h * (a51 * k1.dr + a52 * k2.dr + a53 * k3.dr + a54 * k4.dr), s.theta + h * (a51 * k1.dth + a52 * k2.dth + a53 * k3.dth + a54 * k4.dth), 0, s.pr + h * (a51 * k1.dpr + a52 * k2.dpr + a53 * k3.dpr + a54 * k4.dpr), s.pth + h * (a51 * k1.dpth + a52 * k2.dpth + a53 * k3.dpth + a54 * k4.dpth), s.pph});
+            k6 = get_derivs({s.r + h * (a61 * k1.dr + a62 * k2.dr + a63 * k3.dr + a64 * k4.dr + a65 * k5.dr), s.theta + h * (a61 * k1.dth + a62 * k2.dth + a63 * k3.dth + a64 * k4.dth + a65 * k5.dth), 0, s.pr + h * (a61 * k1.dpr + a62 * k2.dpr + a63 * k3.dpr + a64 * k4.dpr + a65 * k5.dpr), s.pth + h * (a61 * k1.dpth + a62 * k2.dpth + a63 * k3.dpth + a64 * k4.dpth + a65 * k5.dpth), s.pph});
             next_s = {
                 s.r + h * (b1 * k1.dr + b3 * k3.dr + b4 * k4.dr + b6 * k6.dr),
                 s.theta + h * (b1 * k1.dth + b3 * k3.dth + b4 * k4.dth + b6 * k6.dth),
@@ -184,7 +187,7 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, const KerrParams &p,
             break;
         if ((prev_th < 1.570796327f && s.theta >= 1.570796327f) || (prev_th > 1.570796327f && s.theta <= 1.570796327f))
         {
-            RayDerivs ke = get_derivs(s, p);
+            RayDerivs ke = get_derivs(s);
             float t = (1.570796327f - prev_th) / (s.theta - prev_th + 1e-8f);
             float t2 = t * t, t3 = t2 * t;
             float r_hit = (2 * t3 - 3 * t2 + 1) * prev_r + (t3 - 2 * t2 + t) * (k1.dr * h) + (-2 * t3 + 3 * t2) * s.r + (t3 - t2) * (ke.dr * h);

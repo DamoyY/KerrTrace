@@ -33,7 +33,6 @@ extern "C"
         float fwd_x, float fwd_y, float fwd_z,
         float rgt_x, float rgt_y, float rgt_z,
         float up_x, float up_y, float up_z,
-        KerrParams kerr,
         cudaTextureObject_t lut_tex, int lut_size, float max_temp,
         float fov_scale)
     {
@@ -72,7 +71,7 @@ extern "C"
 #pragma unroll
             for (int sx = 0; sx < SSAA_SAMPLES; sx++)
             {
-                float3 sample_color = trace_ray(cam_pos, current_ray, kerr, lut_tex, lut_size, max_temp);
+                float3 sample_color = trace_ray(cam_pos, current_ray, lut_tex, lut_size, max_temp);
                 accumulated_color.x += sample_color.x;
                 accumulated_color.y += sample_color.y;
                 accumulated_color.z += sample_color.z;
