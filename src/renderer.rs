@@ -23,11 +23,6 @@ pub struct CudaRenderer {
     grid_dim: (u32, u32, u32),
 }
 
-macro_rules! push_vec3_args {
-    ($builder:expr, $v:expr) => {
-        $builder.arg(&$v[0]).arg(&$v[1]).arg(&$v[2])
-    };
-}
 impl CudaRenderer {
     pub fn new(config: &Config, cuda_dir: &Path) -> Result<Self> {
         let u_width = config.window.width;
@@ -97,16 +92,14 @@ impl CudaRenderer {
         let width = i32::try_from(self.width).context("Window width exceeds i32 range")?;
         let height = i32::try_from(self.height).context("Window height exceeds i32 range")?;
         unsafe {
-            let launch = self
-                .stream
-                .launch_builder(&self.kernel)
-                .arg(&mut self.image_gpu)
-                .arg(&width)
-                .arg(&height);
-            let launch = push_vec3_args!(launch, cam_pos);
-            let launch = push_vec3_args!(launch, fwd);
-            let launch = push_vec3_args!(launch, rgt);
-            let launch = push_vec3_args!(launch, up);
+            let mut launch = self.stream.launch_builder(&self.kernel);
+            let vecs = [cam_pos, fwd, rgt, up];
+            launch.arg(&mut self.image_gpu);
+            launch.arg(&width);
+            launch.arg(&height);
+            for v in &vecs {
+                launch.arg(&v[0]).arg(&v[1]).arg(&v[2]);
+            }
             launch
                 .arg(&self.lut)
                 .arg(&self.lut_size)
@@ -128,71 +121,50 @@ fn push_define(lines: &mut Vec<String>, key: &str, value: impl Display) {
 }
 
 fn push_define_f32(lines: &mut Vec<String>, key: &str, value: f32) {
-    lines.push(format!("#define {key} {:.10}", value));
+    lines.push(format!("#define {key} {value:.10}"));
 }
 
 fn build_cuda_defines(config: &KernelConfig) -> String {
     let mut lines = Vec::with_capacity(15);
-    push_define(&mut lines, "CONFIG_SSAA_SAMPLES", config.ssaa_samples);
-    push_define_f32(
-        &mut lines,
-        "CONFIG_EXPOSURE_SCALE",
-        config.exposure_scale,
-    );
-    push_define(&mut lines, "CONFIG_SKY_GRID_DIVISIONS", config.sky.grid_divisions);
-    push_define_f32(
-        &mut lines,
-        "CONFIG_SKY_LINE_THICKNESS",
-        config.sky.line_thickness,
-    );
-    push_define_f32(&mut lines, "CONFIG_SKY_INTENSITY", config.sky.intensity);
-    push_define_f32(&mut lines, "CONFIG_BH_SPIN", config.black_hole.spin);
-    push_define_f32(&mut lines, "CONFIG_BH_MASS", config.black_hole.mass);
-    push_define_f32(
-        &mut lines,
-        "CONFIG_DISK_OUTER_RADIUS",
-        config.disk.outer_radius,
-    );
-    push_define_f32(
-        &mut lines,
-        "CONFIG_DISK_TEMPERATURE_SCALE",
-        config.disk.temperature_scale,
-    );
-    push_define_f32(
-        &mut lines,
-        "CONFIG_INTEGRATOR_INITIAL_STEP",
-        config.integrator.initial_step,
-    );
-    push_define_f32(
-        &mut lines,
-        "CONFIG_INTEGRATOR_TOLERANCE",
-        config.integrator.tolerance,
-    );
-    push_define(
-        &mut lines,
-        "CONFIG_INTEGRATOR_MAX_STEPS",
-        config.integrator.max_steps,
-    );
-    push_define(
-        &mut lines,
-        "CONFIG_INTEGRATOR_MAX_ATTEMPTS",
-        config.integrator.max_attempts,
-    );
-    push_define_f32(
-        &mut lines,
-        "CONFIG_TRANSMITTANCE_CUTOFF",
-        config.integrator.transmittance_cutoff,
-    );
-    push_define_f32(
-        &mut lines,
-        "CONFIG_HORIZON_EPSILON",
-        config.integrator.horizon_epsilon,
-    );
-    push_define_f32(
-        &mut lines,
-        "CONFIG_ESCAPE_RADIUS",
-        config.integrator.escape_radius,
-    );
+    let ints = [
+        ("CONFIG_SSAA_SAMPLES", config.ssaa_samples),
+        ("CONFIG_SKY_GRID_DIVISIONS", config.sky.grid_divisions),
+        ("CONFIG_INTEGRATOR_MAX_STEPS", config.integrator.max_steps),
+        (
+            "CONFIG_INTEGRATOR_MAX_ATTEMPTS",
+            config.integrator.max_attempts,
+        ),
+    ];
+    for (key, value) in ints {
+        push_define(&mut lines, key, value);
+    }
+
+    let floats = [
+        ("CONFIG_EXPOSURE_SCALE", config.exposure_scale),
+        ("CONFIG_SKY_LINE_THICKNESS", config.sky.line_thickness),
+        ("CONFIG_SKY_INTENSITY", config.sky.intensity),
+        ("CONFIG_BH_SPIN", config.black_hole.spin),
+        ("CONFIG_BH_MASS", config.black_hole.mass),
+        ("CONFIG_DISK_OUTER_RADIUS", config.disk.outer_radius),
+        (
+            "CONFIG_DISK_TEMPERATURE_SCALE",
+            config.disk.temperature_scale,
+        ),
+        (
+            "CONFIG_INTEGRATOR_INITIAL_STEP",
+            config.integrator.initial_step,
+        ),
+        ("CONFIG_INTEGRATOR_TOLERANCE", config.integrator.tolerance),
+        (
+            "CONFIG_TRANSMITTANCE_CUTOFF",
+            config.integrator.transmittance_cutoff,
+        ),
+        ("CONFIG_HORIZON_EPSILON", config.integrator.horizon_epsilon),
+        ("CONFIG_ESCAPE_RADIUS", config.integrator.escape_radius),
+    ];
+    for (key, value) in floats {
+        push_define_f32(&mut lines, key, value);
+    }
     let mut output = lines.join("\n");
     output.push('\n');
     output

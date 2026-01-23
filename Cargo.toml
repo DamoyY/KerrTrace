@@ -4,17 +4,17 @@ version = "0.0.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "*"
+bytemuck = { version = "*", features = ["derive"] }
 cudarc = { version = "*", features = ["cuda-version-from-build-system"] }
-winit = { version = "*", features = ["rwh_06"] }
-softbuffer = { version = "*", features = ["x11", "wayland"] }
+env_logger = "*"
+glam = "*"
+image = { version = "*", default-features = false, features = ["png"] }
+log = "*"
 serde = { version = "*", features = ["derive"] }
 serde_yaml = { package = "serde_yaml_ng", version = "*" }
-anyhow = "*"
-glam = "*"
-bytemuck = { version = "*", features = ["derive"] }
-log = "*"
-env_logger = "*"
-image = { version = "*", default-features = false, features = ["png"] }
+softbuffer = { version = "*", features = ["x11", "wayland"] }
+winit = { version = "*", features = ["rwh_06"] }
 
 [lints.clippy]
 all = "warn"

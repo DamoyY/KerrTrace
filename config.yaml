@@ -18,7 +18,7 @@ renderer:
   block_dim: [16, 16]
   position_epsilon: 0.00001
   spin: 0.25
-  save_first_frame: true
+  save_first_frame: false
   first_frame_path: first_frame.png
 hud:
   font_name: Consolas
