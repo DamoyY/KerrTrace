@@ -3,6 +3,7 @@
 struct KerrParams
 {
     float a, M, aa, inv_M, A_norm, rh, disk_inner;
+    float inv_w_2, inv_h_2, aspect_ratio;
     float disk_noise_scale, disk_noise_strength, disk_noise_winding;
     int disk_noise_enabled, disk_noise_detail;
 };
@@ -157,7 +158,7 @@ __device__ __forceinline__ float3 get_sky_color(float3 dir, float transmittance)
 {
     const float PI = 3.14159265f;
     float theta_sky = atan2f(dir.z, dir.x);
-    float phi_lat_sky = asinf(fminf(fmaxf(dir.y, -1.0f), 1.0f));
+    float phi_lat_sky = asinf(dir.y);
     float grid_spacing = PI / (float)CONFIG_SKY_GRID_DIVISIONS;
     float line_thickness = CONFIG_SKY_LINE_THICKNESS;
     float d_theta = fmodf(fabsf(theta_sky), grid_spacing);

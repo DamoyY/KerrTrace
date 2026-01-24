@@ -157,6 +157,12 @@ impl CudaRenderer {
                     .context("Failed to launch bloom kernel")?;
             }
         }
+        let post_shared_mem_bytes = self.post_shared_mem_bytes(bloom_active)?;
+        let post_launch_config = LaunchConfig {
+            grid_dim: self.grid_dim,
+            block_dim: self.block_dim,
+            shared_mem_bytes: post_shared_mem_bytes,
+        };
         unsafe {
             let mut launch = self.stream.launch_builder(&self.post_kernel);
             launch
@@ -169,13 +175,33 @@ impl CudaRenderer {
                 .arg(&bloom_sigma)
                 .arg(&self.bloom_intensity)
                 .arg(&bloom_flag)
-                .launch(launch_config)
+                .launch(post_launch_config)
                 .context("Failed to launch post process kernel")?;
         }
         self.stream
             .memcpy_dtoh(&self.image_gpu, &mut self.host_image)
             .context("Failed to copy image back")?;
         self.host_image()
+    }
+
+    fn post_shared_mem_bytes(&self, bloom_active: bool) -> Result<u32> {
+        if !bloom_active {
+            return Ok(0);
+        }
+        let block_x = self.block_dim.0 as usize;
+        let block_y = self.block_dim.1 as usize;
+        let radius = usize::try_from(self.bloom_radius_int)
+            .context("Bloom 半径超出 usize 范围")?;
+        let tile_h = block_y
+            .checked_add(radius.saturating_mul(2))
+            .context("Bloom 共享内存尺寸溢出")?;
+        let tile_len = block_x
+            .checked_mul(tile_h)
+            .context("Bloom 共享内存尺寸溢出")?;
+        let bytes = tile_len
+            .checked_mul(std::mem::size_of::<f32>() * 4)
+            .context("Bloom 共享内存尺寸溢出")?;
+        u32::try_from(bytes).context("Bloom 共享内存尺寸超过 u32")
     }
 
     pub fn host_image(&self) -> Result<&[u32]> {

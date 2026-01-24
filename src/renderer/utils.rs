@@ -51,6 +51,14 @@ fn calc_novikov_thorne_factor(r: f32, a_norm: f32, r_isco: f32, inv_m: f32) -> f
     (q / geometric_denom).max(0.0)
 }
 pub(super) fn build_kerr_params(config: &Config) -> Result<KerrParams> {
+    let window_width = config.window.width;
+    if window_width == 0 {
+        return Err(anyhow!("窗口宽度不能为 0"));
+    }
+    let window_height = config.window.height;
+    if window_height == 0 {
+        return Err(anyhow!("窗口高度不能为 0"));
+    }
     let spin = config.kernel.black_hole.spin;
     let mass = config.kernel.black_hole.mass;
     if !spin.is_finite() {
@@ -83,6 +91,9 @@ pub(super) fn build_kerr_params(config: &Config) -> Result<KerrParams> {
     let detail = i32::try_from(noise.detail)
         .map_err(|_| anyhow!("吸积盘噪声层数超出 i32 范围: {}", noise.detail))?;
     let noise_enabled = i32::from(noise.enabled);
+    let width_f64 = f64::from(window_width);
+    let height_f64 = f64::from(window_height);
+    let aspect_ratio = f32_from_f64_with_context(width_f64 / height_f64, "窗口纵横比")?;
     Ok(KerrParams {
         a: spin,
         m: mass,
@@ -91,6 +102,9 @@ pub(super) fn build_kerr_params(config: &Config) -> Result<KerrParams> {
         a_norm,
         rh,
         disk_inner,
+        inv_w_2: f32_from_f64_with_context(2.0 / width_f64, "窗口宽度倒数")?,
+        inv_h_2: f32_from_f64_with_context(2.0 / height_f64, "窗口高度倒数")?,
+        aspect_ratio,
         disk_noise_scale: noise.scale,
         disk_noise_strength: noise.strength,
         disk_noise_winding: noise.winding,

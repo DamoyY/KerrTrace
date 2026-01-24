@@ -100,11 +100,9 @@ extern "C"
         int y = blockIdx.y * blockDim.y + threadIdx.y;
         if (x >= width || y >= height)
             return;
+        const KerrParams &p = c_params;
         const int SPP = CONFIG_SPP;
         const float INV_SPP = 1.0f / (float)SPP;
-        const float inv_w_2 = 2.0f / (float)width;
-        const float inv_h_2 = 2.0f / (float)height;
-        const float aspect_ratio = (float)width / (float)height;
         const float3 cam_pos = make_float3(cam_x, cam_y, cam_z);
         float3 accumulated_color = make_float3(0.0f, 0.0f, 0.0f);
         unsigned int pixel_index = (unsigned int)(y * width + x);
@@ -115,8 +113,8 @@ extern "C"
                 (unsigned long long)(pixel_index) << 32 | (unsigned long long)(unsigned int)s;
             float rx = rand01(base);
             float ry = rand01(base ^ 0xda3e39cb94b95bdbULL);
-            float u = ((x + rx) * inv_w_2 - 1.0f) * aspect_ratio * fov_scale;
-            float v = (1.0f - (y + ry) * inv_h_2) * fov_scale;
+            float u = ((x + rx) * p.inv_w_2 - 1.0f) * p.aspect_ratio * fov_scale;
+            float v = (1.0f - (y + ry) * p.inv_h_2) * fov_scale;
             float3 ray_dir;
             ray_dir.x = u * rgt_x + v * up_x + fwd_x;
             ray_dir.y = u * rgt_y + v * up_y + fwd_y;
@@ -184,25 +182,63 @@ extern "C"
         float intensity,
         int bloom_enabled)
     {
+        extern __shared__ float4 bloom_tile[];
         int x = blockIdx.x * blockDim.x + threadIdx.x;
         int y = blockIdx.y * blockDim.y + threadIdx.y;
-        if (x >= width || y >= height)
-            return;
+        bool in_bounds = x < width && y < height;
+        if (bloom_enabled && radius > 0 && intensity > 0.0f)
+        {
+            int tile_w = (int)blockDim.x;
+            int tile_h = (int)blockDim.y + radius * 2;
+            int local_x = (int)threadIdx.x;
+            int local_y = (int)threadIdx.y;
+            for (int tile_y = local_y; tile_y < tile_h; tile_y += (int)blockDim.y)
+            {
+                int global_y = (int)blockIdx.y * (int)blockDim.y + tile_y - radius;
+                int global_x = (int)blockIdx.x * (int)blockDim.x + local_x;
+                float4 v = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+                if (global_x < width && global_y >= 0 && global_y < height)
+                {
+                    v = bloom_buffer[global_y * width + global_x];
+                }
+                bloom_tile[tile_y * tile_w + local_x] = v;
+            }
+            __syncthreads();
+            if (!in_bounds)
+                return;
+        }
+        else
+        {
+            if (!in_bounds)
+                return;
+        }
         int idx = y * width + x;
         float4 base = accumulation_buffer[idx];
         float3 final_color = make_float3(base.x, base.y, base.z);
         if (bloom_enabled && radius > 0 && intensity > 0.0f)
         {
-            float3 accum = gaussian_blur_axis(
-                bloom_buffer,
-                width,
-                height,
-                x,
-                y,
-                radius,
-                sigma,
-                0,
-                1);
+            float3 accum = make_float3(0.0f, 0.0f, 0.0f);
+            float weight_sum = 0.0f;
+            int tile_w = (int)blockDim.x;
+            int base_tile_y = (int)threadIdx.y + radius;
+            for (int i = -radius; i <= radius; i++)
+            {
+                int sy = y + i;
+                if (sy < 0 || sy >= height)
+                    continue;
+                float w = gaussian_weight(i, sigma);
+                float4 c = bloom_tile[(base_tile_y + i) * tile_w + (int)threadIdx.x];
+                accum.x += c.x * w;
+                accum.y += c.y * w;
+                accum.z += c.z * w;
+                weight_sum += w;
+            }
+            if (weight_sum > 0.0f)
+            {
+                accum.x /= weight_sum;
+                accum.y /= weight_sum;
+                accum.z /= weight_sum;
+            }
             final_color.x += accum.x * intensity;
             final_color.y += accum.y * intensity;
             final_color.z += accum.z * intensity;

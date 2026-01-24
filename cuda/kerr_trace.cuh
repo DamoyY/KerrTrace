@@ -109,8 +109,7 @@ __device__ float3 trace_ray(
             float px_hit = lerp_hermite(prev_px, k1.dpx * h, s.px, ke.dpx * h, t);
             float py_hit = lerp_hermite(prev_py, k1.dpy * h, s.py, ke.dpy * h, t);
             float pz_hit = lerp_hermite(prev_pz, k1.dpz * h, s.pz, ke.dpz * h, t);
-            float sin_th, cos_th, phi_hit, r_hit;
-            ks_bl_from_xyz(x_hit, 0.0f, z_hit, p, r_hit, sin_th, cos_th, phi_hit);
+            float r_hit = ks_r_from_xyz(x_hit, 0.0f, z_hit, p.aa);
             if (r_hit >= disk_inner && r_hit <= disk_outer)
             {
                 float sqrt_M = __fsqrt_rn(p.M), r_sqrt = __fsqrt_rn(r_hit);
@@ -138,6 +137,8 @@ __device__ float3 trace_ray(
                     float T = CONFIG_DISK_TEMPERATURE_SCALE * sampled * g;
                     if (p.disk_noise_enabled && p.disk_noise_detail > 0 && p.disk_noise_strength != 0.0f)
                     {
+                        float sin_th, cos_th, phi_hit;
+                        ks_bl_from_xyz(x_hit, 0.0f, z_hit, p, r_hit, sin_th, cos_th, phi_hit);
                         float r3 = r_hit * r_hit * r_hit;
                         float omega = 1.0f / (p.a + __fsqrt_rn(r3 * p.inv_M));
                         float spiral_phase = phi_hit + p.disk_noise_winding * omega;
