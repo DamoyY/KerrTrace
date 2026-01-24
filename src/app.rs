@@ -36,7 +36,7 @@ pub struct App {
     keys_pressed: HashSet<KeyCode>,
     mouse_locked: bool,
     last_present: Instant,
-    last_frame: Option<Vec<u32>>,
+    has_frame: bool,
     fps_last_instant: Instant,
     fps_frames: u32,
     fps_value: f32,
@@ -66,7 +66,7 @@ impl App {
             keys_pressed: HashSet::new(),
             mouse_locked: false,
             last_present: now,
-            last_frame: None,
+            has_frame: false,
             fps_last_instant: now,
             fps_frames: 0,
             fps_value: 0.0,
@@ -164,36 +164,34 @@ impl App {
         }
         let (fwd, rgt, up) = calculate_camera_basis(self.cam_yaw, self.cam_pitch);
         let fov_scale = (self.fov.to_radians() / 2.0).tan();
-        let buffer_u32 = {
+        let save_first_frame = self.config.renderer.save_first_frame;
+        let first_frame_path = self.config.renderer.first_frame_path.clone();
+        let width = self.config.window.width;
+        let height = self.config.window.height;
+        {
             let renderer = self.renderer.as_mut().context("Renderer not initialized")?;
-            renderer.render(
+            let buffer_u32 = renderer.render(
                 self.cam_pos.to_array(),
                 fwd.to_array(),
                 rgt.to_array(),
                 up.to_array(),
                 fov_scale,
-            )?
-        };
-        if self.config.renderer.save_first_frame {
-            let path = Path::new(&self.config.renderer.first_frame_path);
-            if !path.exists() {
-                let mut buffer_u8 = Vec::with_capacity(buffer_u32.len() * 4);
-                for pixel in &buffer_u32 {
-                    let r = ((pixel >> 16) & 0xFF) as u8;
-                    let g = ((pixel >> 8) & 0xFF) as u8;
-                    let b = (pixel & 0xFF) as u8;
-                    buffer_u8.extend_from_slice(&[r, g, b, 255]);
+            )?;
+            if save_first_frame {
+                let path = Path::new(&first_frame_path);
+                if !path.exists() {
+                    let mut buffer_u8 = Vec::with_capacity(buffer_u32.len() * 4);
+                    for &pixel in buffer_u32 {
+                        let r = ((pixel >> 16) & 0xFF) as u8;
+                        let g = ((pixel >> 8) & 0xFF) as u8;
+                        let b = (pixel & 0xFF) as u8;
+                        buffer_u8.extend_from_slice(&[r, g, b, 255]);
+                    }
+                    image::save_buffer(path, &buffer_u8, width, height, image::ColorType::Rgba8)?;
                 }
-                image::save_buffer(
-                    path,
-                    &buffer_u8,
-                    self.config.window.width,
-                    self.config.window.height,
-                    image::ColorType::Rgba8,
-                )?;
             }
         }
-        self.last_frame = Some(buffer_u32);
+        self.has_frame = true;
         self.prev_cam_pos = self.cam_pos;
         self.prev_cam_yaw = self.cam_yaw;
         self.prev_cam_pitch = self.cam_pitch;
@@ -202,7 +200,7 @@ impl App {
     }
 
     fn should_render(&self) -> bool {
-        if self.last_frame.is_none() {
+        if !self.has_frame {
             return true;
         }
         let position_delta = (self.cam_pos - self.prev_cam_pos).length();
@@ -218,7 +216,11 @@ impl App {
     }
 
     fn present_frame(&mut self) -> Result<()> {
-        let buffer_u32 = self.last_frame.as_ref().context("Missing render buffer")?;
+        if !self.has_frame {
+            return Err(anyhow!("Missing render buffer"));
+        }
+        let renderer = self.renderer.as_ref().context("Renderer not initialized")?;
+        let buffer_u32 = renderer.host_image()?;
         let width = self.config.window.width;
         let height = self.config.window.height;
         let hud_layout = self.build_hud_layout(width, height)?;

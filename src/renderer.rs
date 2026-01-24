@@ -3,7 +3,8 @@ use std::{fs, path::Path, sync::Arc};
 use anyhow::{Context, Result, anyhow};
 use cudarc::{
     driver::{
-        CudaContext, CudaFunction, CudaSlice, CudaStream, DeviceRepr, LaunchConfig, PushKernelArg,
+        CudaContext, CudaFunction, CudaSlice, CudaStream, DeviceRepr, LaunchConfig,
+        PinnedHostSlice, PushKernelArg,
     },
     nvrtc::{CompileOptions, compile_ptx_with_opts},
 };
@@ -31,6 +32,7 @@ pub struct CudaRenderer {
     stream: Arc<CudaStream>,
     kernel: CudaFunction,
     image_gpu: CudaSlice<u32>,
+    host_image: PinnedHostSlice<u32>,
     lut_texture: CudaTextureLut,
     disk_texture: CudaTextureLut,
     lut_size: i32,
@@ -85,6 +87,8 @@ impl CudaRenderer {
         let image_gpu = stream
             .alloc_zeros::<u32>((u_width * u_height) as usize)
             .context("allocate 图像缓存失败")?;
+        let host_image = unsafe { context.alloc_pinned::<u32>((u_width * u_height) as usize) }
+            .context("allocate 固定主机内存失败")?;
         let block_x = config.renderer.block_dim[0];
         let block_y = config.renderer.block_dim[1];
         let grid_x = u_width.div_ceil(block_x);
@@ -104,6 +108,7 @@ impl CudaRenderer {
             stream,
             kernel,
             image_gpu,
+            host_image,
             lut_texture,
             disk_texture,
             lut_size,
@@ -124,7 +129,7 @@ impl CudaRenderer {
         rgt: [f32; 3],
         up: [f32; 3],
         fov_scale: f32,
-    ) -> Result<Vec<u32>> {
+    ) -> Result<&[u32]> {
         let launch_config = LaunchConfig {
             grid_dim: self.grid_dim,
             block_dim: self.block_dim,
@@ -152,10 +157,15 @@ impl CudaRenderer {
                 .launch(launch_config)
                 .context("Failed to launch kernel")?;
         }
-        let host_image = self
-            .stream
-            .clone_dtoh(&self.image_gpu)
+        self.stream
+            .memcpy_dtoh(&self.image_gpu, &mut self.host_image)
             .context("Failed to copy image back")?;
-        Ok(host_image)
+        self.host_image()
+    }
+
+    pub fn host_image(&self) -> Result<&[u32]> {
+        self.host_image
+            .as_slice()
+            .context("Failed to sync image buffer")
     }
 }
