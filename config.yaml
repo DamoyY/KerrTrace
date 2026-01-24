@@ -11,7 +11,7 @@ camera:
   fov_limit: [1.0, 120.0]
   zoom_speed: 5.0
 controls:
-  move_speed: 0.5
+  move_speed: 20.0
   sprint_multiplier: 2.0
   mouse_sensitivity: 0.06
 renderer:
