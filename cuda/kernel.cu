@@ -23,6 +23,17 @@ __device__ unsigned char float_to_byte(float val)
 {
     return (unsigned char)__float2int_rn(__saturatef(val) * 255.0f);
 }
+__device__ __forceinline__ unsigned int pcg32(unsigned long long state)
+{
+    unsigned long long x = state * 6364136223846793005ULL + 1442695040888963407ULL;
+    unsigned int xorshifted = (unsigned int)(((x >> 18u) ^ x) >> 27u);
+    unsigned int rot = (unsigned int)(x >> 59u);
+    return (xorshifted >> rot) | (xorshifted << ((32u - rot) & 31));
+}
+__device__ __forceinline__ float rand01(unsigned long long state)
+{
+    return (float)pcg32(state) * (1.0f / 4294967296.0f);
+}
 #include "kerr.cuh"
 extern "C"
 {
@@ -41,58 +52,41 @@ extern "C"
         int y = blockIdx.y * blockDim.y + threadIdx.y;
         if (x >= width || y >= height)
             return;
-        const int SSAA_SAMPLES = CONFIG_SSAA_SAMPLES;
-        const float INV_SAMPLES = 1.0f / (float)SSAA_SAMPLES;
+        const int SPP = CONFIG_SPP;
+        const float INV_SPP = 1.0f / (float)SPP;
         const float inv_w_2 = 2.0f / (float)width;
         const float inv_h_2 = 2.0f / (float)height;
         const float aspect_ratio = (float)width / (float)height;
         const float3 cam_pos = make_float3(cam_x, cam_y, cam_z);
-        float start_offset = 0.5f * INV_SAMPLES;
-        float u_start = ((x + start_offset) * inv_w_2 - 1.0f) * aspect_ratio * fov_scale;
-        float v_start = (1.0f - (y + start_offset) * inv_h_2) * fov_scale;
-        float3 ray_base;
-        ray_base.x = u_start * rgt_x + v_start * up_x + fwd_x;
-        ray_base.y = u_start * rgt_y + v_start * up_y + fwd_y;
-        ray_base.z = u_start * rgt_z + v_start * up_z + fwd_z;
-        float du = (INV_SAMPLES * inv_w_2) * aspect_ratio * fov_scale;
-        float dv = -(INV_SAMPLES * inv_h_2) * fov_scale;
-        float3 step_x, step_y;
-        step_x.x = rgt_x * du;
-        step_x.y = rgt_y * du;
-        step_x.z = rgt_z * du;
-        step_y.x = up_x * dv;
-        step_y.y = up_y * dv;
-        step_y.z = up_z * dv;
         float3 accumulated_color = make_float3(0.0f, 0.0f, 0.0f);
-        float3 row_ray = ray_base;
+        unsigned int pixel_index = (unsigned int)(y * width + x);
 #pragma unroll
-        for (int sy = 0; sy < SSAA_SAMPLES; sy++)
+        for (int s = 0; s < SPP; s++)
         {
-            float3 current_ray = row_ray;
-#pragma unroll
-            for (int sx = 0; sx < SSAA_SAMPLES; sx++)
-            {
-                float3 sample_color = trace_ray(
-                    cam_pos,
-                    current_ray,
-                    lut_tex,
-                    lut_size,
-                    max_temp,
-                    disk_tex,
-                    disk_inner,
-                    disk_outer);
-                accumulated_color.x += sample_color.x;
-                accumulated_color.y += sample_color.y;
-                accumulated_color.z += sample_color.z;
-                current_ray.x += step_x.x;
-                current_ray.y += step_x.y;
-                current_ray.z += step_x.z;
-            }
-            row_ray.x += step_y.x;
-            row_ray.y += step_y.y;
-            row_ray.z += step_y.z;
+            unsigned long long base =
+                (unsigned long long)(pixel_index) << 32 | (unsigned long long)(unsigned int)s;
+            float rx = rand01(base);
+            float ry = rand01(base ^ 0xda3e39cb94b95bdbULL);
+            float u = ((x + rx) * inv_w_2 - 1.0f) * aspect_ratio * fov_scale;
+            float v = (1.0f - (y + ry) * inv_h_2) * fov_scale;
+            float3 ray_dir;
+            ray_dir.x = u * rgt_x + v * up_x + fwd_x;
+            ray_dir.y = u * rgt_y + v * up_y + fwd_y;
+            ray_dir.z = u * rgt_z + v * up_z + fwd_z;
+            float3 sample_color = trace_ray(
+                cam_pos,
+                ray_dir,
+                lut_tex,
+                lut_size,
+                max_temp,
+                disk_tex,
+                disk_inner,
+                disk_outer);
+            accumulated_color.x += sample_color.x;
+            accumulated_color.y += sample_color.y;
+            accumulated_color.z += sample_color.z;
         }
-        const float final_scale = CONFIG_EXPOSURE_SCALE * (INV_SAMPLES * INV_SAMPLES);
+        const float final_scale = CONFIG_EXPOSURE_SCALE * INV_SPP;
         accumulated_color.x *= final_scale;
         accumulated_color.y *= final_scale;
         accumulated_color.z *= final_scale;

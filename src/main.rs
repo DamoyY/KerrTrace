@@ -69,7 +69,7 @@ pub struct CudaConfig {
 }
 #[derive(Debug, Deserialize, Clone)]
 pub struct KernelConfig {
-    pub ssaa_samples: u32,
+    pub spp: u32,
     pub exposure_scale: f32,
     pub sky: SkyConfig,
     pub black_hole: BlackHoleConfig,

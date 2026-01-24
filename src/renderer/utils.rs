@@ -94,7 +94,7 @@ fn push_define_f32(lines: &mut Vec<String>, key: &str, value: f32) {
 pub(super) fn build_cuda_defines(config: &KernelConfig) -> String {
     let mut lines = Vec::with_capacity(15);
     let ints = [
-        ("CONFIG_SSAA_SAMPLES", config.ssaa_samples),
+        ("CONFIG_SPP", config.spp),
         ("CONFIG_SKY_GRID_DIVISIONS", config.sky.grid_divisions),
         ("CONFIG_INTEGRATOR_MAX_STEPS", config.integrator.max_steps),
         (
