@@ -73,7 +73,7 @@ impl CudaRenderer {
             .context("创建吸积盘纹理失败")?;
         let kernel_source =
             fs::read_to_string(cuda_dir.join("kernel.cu")).context("读取 kernel.cu 失败")?;
-        let defines = build_cuda_defines(&config.kernel);
+        let defines = build_cuda_defines(&config.kernel, config.blackbody.wavelength_step);
         let full_source = format!("{defines}\n{kernel_source}");
         let ptx_opts = CompileOptions {
             include_paths: vec![cuda_dir.to_string_lossy().to_string()],

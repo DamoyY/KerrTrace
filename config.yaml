@@ -36,11 +36,11 @@ cuda:
   use_fast_math: true
 kernel:
   spp: 4
-  exposure_scale: 0.06
+  exposure_scale: 6e-3
   sky:
     grid_divisions: 40
     line_thickness: 5e-4
-    intensity: 5.0
+    intensity: 50.0
   black_hole:
     spin: -0.45
     mass: 0.5

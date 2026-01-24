@@ -83,7 +83,7 @@ fn push_define(lines: &mut Vec<String>, key: &str, value: impl Display) {
 fn push_define_f32(lines: &mut Vec<String>, key: &str, value: f32) {
     lines.push(format!("#define {key} {value:.10}"));
 }
-pub(super) fn build_cuda_defines(config: &KernelConfig) -> String {
+pub(super) fn build_cuda_defines(config: &KernelConfig, wavelength_step: f32) -> String {
     let mut lines = Vec::with_capacity(15);
     let ints = [
         ("CONFIG_SPP", config.spp),
@@ -117,6 +117,7 @@ pub(super) fn build_cuda_defines(config: &KernelConfig) -> String {
         ),
         ("CONFIG_HORIZON_EPSILON", config.integrator.horizon_epsilon),
         ("CONFIG_ESCAPE_RADIUS", config.integrator.escape_radius),
+        ("CONFIG_BLACKBODY_WAVELENGTH_STEP", wavelength_step),
     ];
     for (key, value) in floats {
         push_define_f32(&mut lines, key, value);
@@ -225,6 +226,9 @@ pub(super) fn generate_blackbody_lut(
             y_sum += intensities[i] * ys[i];
             z_sum += intensities[i] * zs[i];
         }
+        x_sum *= wavelength_step;
+        y_sum *= wavelength_step;
+        z_sum *= wavelength_step;
         let (r, g, b) = xyz_to_rgb(x_sum, y_sum, z_sum);
         lut_data.push(r);
         lut_data.push(g);

@@ -33,34 +33,6 @@ __device__ __forceinline__ float calc_isco(float A_norm, bool prograde, float M)
     float term_inside = (3.0f - Z1) * (3.0f + Z1 + 2.0f * Z2);
     return M * (3.0f + Z2 + sign * __fsqrt_rn(fmaxf(term_inside, 0.0f)));
 }
-__device__ float calc_novikov_thorne_factor(float r, float A_norm, float r_isco, float inv_M)
-{
-    if (r <= r_isco)
-        return 0.0f;
-    float R_norm = r * inv_M;
-    float R_isco_norm = r_isco * inv_M;
-    float x = __fsqrt_rn(R_norm);
-    float x_ms = __fsqrt_rn(R_isco_norm);
-    float angle_base = acosf(-A_norm) * 0.33333333f;
-    const float ang_step = 2.094395102f;
-    float roots[3] = {
-        2.0f * cosf(angle_base),
-        2.0f * cosf(angle_base - ang_step),
-        2.0f * cosf(angle_base + ang_step)};
-    float sum_log = 0.0f;
-#pragma unroll
-    for (int i = 0; i < 3; i++)
-    {
-        float xi = roots[i];
-        float coef = __fdividef(3.0f * (xi - A_norm) * (xi - A_norm), xi * (xi - roots[(i + 1) % 3]) * (xi - roots[(i + 2) % 3]));
-        float val = __fdividef(x - xi, x_ms - xi);
-        if (val > 0.0f)
-            sum_log += coef * __logf(val);
-    }
-    float Q = (x - x_ms) - 1.5f * A_norm * __logf(__fdividef(x, x_ms)) - sum_log;
-    float geometric_denom = R_norm * (R_norm * x - 3.0f * x + 2.0f * A_norm);
-    return geometric_denom <= 0.0f ? 0.0f : __fdividef(Q, geometric_denom), 0.0f;
-}
 __device__ __forceinline__ RayDerivs get_derivs(const RayState &s)
 {
     const KerrParams &p = c_params;
@@ -210,7 +182,9 @@ __device__ float3 trace_ray(
                     if (isfinite(T) && T > 0.0f)
                     {
                         float3 d_col = fetch_color_from_lut(fminf(T, max_temp), lut_tex, lut_size, max_temp);
-                        float alpha = (0.2126f * d_col.x + 0.7152f * d_col.y + 0.0722f * d_col.z) / (1.0f + (0.2126f * d_col.x + 0.7152f * d_col.y + 0.0722f * d_col.z));
+                        float luma = 0.2126f * d_col.x + 0.7152f * d_col.y + 0.0722f * d_col.z;
+                        float luma_scaled = luma / CONFIG_BLACKBODY_WAVELENGTH_STEP;
+                        float alpha = luma_scaled / (1.0f + luma_scaled);
                         color.x += d_col.x * alpha * transmittance;
                         color.y += d_col.y * alpha * transmittance;
                         color.z += d_col.z * alpha * transmittance;
