@@ -28,9 +28,20 @@ struct KerrParams {
     disk_inner: f32,
 }
 unsafe impl DeviceRepr for KerrParams {}
+struct RendererBuffers {
+    hdr_buffer: CudaSlice<f32>,
+    bloom_buffer: CudaSlice<f32>,
+    image_gpu: CudaSlice<u32>,
+    host_image: PinnedHostSlice<u32>,
+    lut_error_flag: CudaSlice<u32>,
+}
 pub struct CudaRenderer {
     stream: Arc<CudaStream>,
-    kernel: CudaFunction,
+    trace_kernel: CudaFunction,
+    bloom_kernel: CudaFunction,
+    post_kernel: CudaFunction,
+    hdr_buffer: CudaSlice<f32>,
+    bloom_buffer: CudaSlice<f32>,
     image_gpu: CudaSlice<u32>,
     host_image: PinnedHostSlice<u32>,
     lut_texture: CudaTextureLut,
@@ -44,6 +55,10 @@ pub struct CudaRenderer {
     height: u32,
     block_dim: (u32, u32, u32),
     grid_dim: (u32, u32, u32),
+    bloom_enabled: bool,
+    bloom_intensity: f32,
+    bloom_radius: f32,
+    bloom_radius_int: i32,
 }
 impl CudaRenderer {
     pub fn new(config: &Config, cuda_dir: &Path) -> Result<Self> {
@@ -52,6 +67,84 @@ impl CudaRenderer {
         let context = CudaContext::new(0).context("初始化 CUDA 上下文失败")?;
         let stream = context.default_stream();
         let kerr_params = build_kerr_params(&config.kernel)?;
+        let (bloom_enabled, bloom_intensity, bloom_radius, bloom_radius_int) =
+            Self::validate_bloom_settings(config)?;
+        let (lut_texture, disk_texture, lut_size, lut_max_temp) =
+            Self::build_textures(&stream, config, &kerr_params)?;
+        let (trace_kernel, bloom_kernel, post_kernel) =
+            Self::build_cuda_kernels(&context, &stream, config, cuda_dir, &kerr_params)?;
+        let RendererBuffers {
+            hdr_buffer,
+            bloom_buffer,
+            image_gpu,
+            host_image,
+            lut_error_flag,
+        } = Self::allocate_buffers(&context, &stream, u_width, u_height)?;
+        let (block_dim, grid_dim) = Self::compute_launch_dims(config, u_width, u_height);
+        Ok(Self {
+            stream,
+            trace_kernel,
+            bloom_kernel,
+            post_kernel,
+            hdr_buffer,
+            bloom_buffer,
+            image_gpu,
+            host_image,
+            lut_texture,
+            disk_texture,
+            lut_size,
+            lut_max_temp,
+            lut_error_flag,
+            disk_inner: kerr_params.disk_inner,
+            disk_outer: config.kernel.disk.outer_radius,
+            width: u_width,
+            height: u_height,
+            block_dim,
+            grid_dim,
+            bloom_enabled,
+            bloom_intensity,
+            bloom_radius,
+            bloom_radius_int,
+        })
+    }
+
+    fn validate_bloom_settings(config: &Config) -> Result<(bool, f32, f32, i32)> {
+        let bloom_enabled = config.bloom.enabled;
+        let bloom_intensity = config.bloom.intensity;
+        if !bloom_intensity.is_finite() || bloom_intensity < 0.0 {
+            return Err(anyhow!("Bloom 强度无效: {bloom_intensity}"));
+        }
+        let bloom_radius = config.bloom.radius;
+        if !bloom_radius.is_finite() || bloom_radius < 0.0 {
+            return Err(anyhow!("Bloom 半径无效: {bloom_radius}"));
+        }
+        let max_radius = f64::from(i32::MAX);
+        let radius_f64 = f64::from(bloom_radius);
+        if radius_f64 > max_radius {
+            return Err(anyhow!("Bloom 半径过大: {bloom_radius}"));
+        }
+        let bloom_radius_int = if bloom_radius <= 0.0 {
+            0
+        } else {
+            let radius_ceil = bloom_radius.ceil();
+            if f64::from(radius_ceil) > max_radius {
+                return Err(anyhow!("Bloom 半径过大: {bloom_radius}"));
+            }
+            unsafe { radius_ceil.to_int_unchecked::<i32>() }
+        };
+        Ok((
+            bloom_enabled,
+            bloom_intensity,
+            bloom_radius,
+            bloom_radius_int,
+        ))
+    }
+
+    fn build_textures(
+        stream: &Arc<CudaStream>,
+        config: &Config,
+        kerr_params: &KerrParams,
+    ) -> Result<(CudaTextureLut, CudaTextureLut, i32, f32)> {
         let (lut_cpu, lut_max_temp) = generate_blackbody_lut(
             config.blackbody.lut_size,
             config.blackbody.lut_max_temp,
@@ -61,17 +154,28 @@ impl CudaRenderer {
         )
         .context("生成黑体查找表失败")?;
         let disk_lut = generate_disk_temperature_lut(
-            &kerr_params,
+            kerr_params,
             config.kernel.disk.outer_radius,
             config.blackbody.lut_size,
         )
         .context("生成吸积盘温度分布表失败")?;
         let lut_size =
             i32::try_from(config.blackbody.lut_size).context("LUT size exceeds i32 range")?;
-        let lut_texture = create_lut_texture(&stream, &lut_cpu, config.blackbody.lut_size)
+        let lut_texture = create_lut_texture(stream.as_ref(), &lut_cpu, config.blackbody.lut_size)
             .context("创建 LUT 纹理失败")?;
-        let disk_texture = create_disk_texture(&stream, &disk_lut, config.blackbody.lut_size)
-            .context("创建吸积盘纹理失败")?;
+        let disk_texture =
+            create_disk_texture(stream.as_ref(), &disk_lut, config.blackbody.lut_size)
+                .context("创建吸积盘纹理失败")?;
+        Ok((lut_texture, disk_texture, lut_size, lut_max_temp))
+    }
+
+    fn build_cuda_kernels(
+        context: &Arc<CudaContext>,
+        stream: &Arc<CudaStream>,
+        config: &Config,
+        cuda_dir: &Path,
+        kerr_params: &KerrParams,
+    ) -> Result<(CudaFunction, CudaFunction, CudaFunction)> {
         let kernel_source =
             fs::read_to_string(cuda_dir.join("kernel.cu")).context("读取 kernel.cu 失败")?;
         let defines = build_cuda_defines(&config.kernel, config.blackbody.wavelength_step);
@@ -84,21 +188,17 @@ impl CudaRenderer {
         };
         let ptx = compile_ptx_with_opts(&full_source, ptx_opts).context("编译 PTX 失败")?;
         let module = context.load_module(ptx).context("加载 PTX 模块失败")?;
-        let kernel = module.load_function("kernel").context("获取核函数失败")?;
-        let image_gpu = stream
-            .alloc_zeros::<u32>((u_width * u_height) as usize)
-            .context("allocate 图像缓存失败")?;
-        let host_image = unsafe { context.alloc_pinned::<u32>((u_width * u_height) as usize) }
-            .context("allocate 固定主机内存失败")?;
-        let lut_error_flag = stream
-            .alloc_zeros::<u32>(2)
-            .context("allocate LUT 错误标记失败")?;
-        let block_x = config.renderer.block_dim[0];
-        let block_y = config.renderer.block_dim[1];
-        let grid_x = u_width.div_ceil(block_x);
-        let grid_y = u_height.div_ceil(block_y);
+        let trace_kernel = module
+            .load_function("trace_kernel")
+            .context("获取 trace kernel 失败")?;
+        let bloom_kernel = module
+            .load_function("bloom_horizontal")
+            .context("获取 bloom kernel 失败")?;
+        let post_kernel = module
+            .load_function("post_process")
+            .context("获取 post process kernel 失败")?;
         let mut params_symbol = module
-            .get_global("c_params", &stream)
+            .get_global("c_params", stream)
             .context("获取常量内存符号 c_params 失败")?;
         let mut params_view = unsafe {
             params_symbol
@@ -106,25 +206,56 @@ impl CudaRenderer {
                 .ok_or_else(|| anyhow!("c_params 常量内存大小不足"))?
         };
         stream
-            .memcpy_htod(std::slice::from_ref(&kerr_params), &mut params_view)
+            .memcpy_htod(std::slice::from_ref(kerr_params), &mut params_view)
             .context("复制 Kerr 参数到常量内存失败")?;
-        Ok(Self {
-            stream,
-            kernel,
+        Ok((trace_kernel, bloom_kernel, post_kernel))
+    }
+
+    fn allocate_buffers(
+        context: &Arc<CudaContext>,
+        stream: &Arc<CudaStream>,
+        width: u32,
+        height: u32,
+    ) -> Result<RendererBuffers> {
+        let pixel_count = (width as usize)
+            .checked_mul(height as usize)
+            .context("图像尺寸超出 usize 范围")?;
+        let hdr_len = pixel_count
+            .checked_mul(4)
+            .context("HDR 缓冲区尺寸超出 usize 范围")?;
+        let hdr_buffer = stream
+            .alloc_zeros::<f32>(hdr_len)
+            .context("allocate HDR 缓冲区失败")?;
+        let bloom_buffer = stream
+            .alloc_zeros::<f32>(hdr_len)
+            .context("allocate Bloom 缓冲区失败")?;
+        let image_gpu = stream
+            .alloc_zeros::<u32>(pixel_count)
+            .context("allocate 图像缓存失败")?;
+        let host_image = unsafe { context.alloc_pinned::<u32>(pixel_count) }
+            .context("allocate 固定主机内存失败")?;
+        let lut_error_flag = stream
+            .alloc_zeros::<u32>(2)
+            .context("allocate LUT 错误标记失败")?;
+        Ok(RendererBuffers {
+            hdr_buffer,
+            bloom_buffer,
             image_gpu,
             host_image,
-            lut_texture,
-            disk_texture,
-            lut_size,
-            lut_max_temp,
             lut_error_flag,
-            disk_inner: kerr_params.disk_inner,
-            disk_outer: config.kernel.disk.outer_radius,
-            width: u_width,
-            height: u_height,
-            block_dim: (block_x, block_y, 1),
-            grid_dim: (grid_x, grid_y, 1),
         })
+    }
+
+    const fn compute_launch_dims(
+        config: &Config,
+        width: u32,
+        height: u32,
+    ) -> ((u32, u32, u32), (u32, u32, u32)) {
+        let block_x = config.renderer.block_dim[0];
+        let block_y = config.renderer.block_dim[1];
+        let grid_x = width.div_ceil(block_x);
+        let grid_y = height.div_ceil(block_y);
+        ((block_x, block_y, 1), (grid_x, grid_y, 1))
     }
 
     pub fn render(
@@ -146,9 +277,9 @@ impl CudaRenderer {
         let width = i32::try_from(self.width).context("Window width exceeds i32 range")?;
         let height = i32::try_from(self.height).context("Window height exceeds i32 range")?;
         unsafe {
-            let mut launch = self.stream.launch_builder(&self.kernel);
+            let mut launch = self.stream.launch_builder(&self.trace_kernel);
             let vecs = [cam_pos, fwd, rgt, up];
-            launch.arg(&mut self.image_gpu);
+            launch.arg(&mut self.hdr_buffer);
             launch.arg(&width);
             launch.arg(&height);
             for v in &vecs {
@@ -176,6 +307,39 @@ impl CudaRenderer {
                 "颜色温度超过 lut_max_temp: {temp} > {}",
                 self.lut_max_temp
             ));
+        }
+        let bloom_active =
+            self.bloom_enabled && self.bloom_radius_int > 0 && self.bloom_intensity > 0.0;
+        let bloom_flag = i32::from(bloom_active);
+        if bloom_active {
+            unsafe {
+                let mut launch = self.stream.launch_builder(&self.bloom_kernel);
+                launch
+                    .arg(&self.hdr_buffer)
+                    .arg(&mut self.bloom_buffer)
+                    .arg(&width)
+                    .arg(&height)
+                    .arg(&self.bloom_radius_int)
+                    .arg(&self.bloom_radius)
+                    .arg(&bloom_flag)
+                    .launch(launch_config)
+                    .context("Failed to launch bloom kernel")?;
+            }
+        }
+        unsafe {
+            let mut launch = self.stream.launch_builder(&self.post_kernel);
+            launch
+                .arg(&self.hdr_buffer)
+                .arg(&self.bloom_buffer)
+                .arg(&mut self.image_gpu)
+                .arg(&width)
+                .arg(&height)
+                .arg(&self.bloom_radius_int)
+                .arg(&self.bloom_radius)
+                .arg(&self.bloom_intensity)
+                .arg(&bloom_flag)
+                .launch(launch_config)
+                .context("Failed to launch post process kernel")?;
         }
         self.stream
             .memcpy_dtoh(&self.image_gpu, &mut self.host_image)

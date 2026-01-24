@@ -17,6 +17,7 @@ pub struct Config {
     pub camera: CameraConfig,
     pub controls: ControlsConfig,
     pub renderer: RendererConfig,
+    pub bloom: BloomConfig,
     pub hud: HudConfig,
     pub blackbody: BlackbodyConfig,
     pub cuda: CudaConfig,
@@ -49,6 +50,12 @@ pub struct RendererConfig {
     pub block_dim: [u32; 2],
     pub save_first_frame: bool,
     pub first_frame_path: String,
+}
+#[derive(Debug, Deserialize, Clone)]
+pub struct BloomConfig {
+    pub enabled: bool,
+    pub intensity: f32,
+    pub radius: f32,
 }
 #[derive(Debug, Deserialize, Clone)]
 pub struct HudConfig {

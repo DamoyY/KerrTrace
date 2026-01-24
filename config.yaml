@@ -18,6 +18,10 @@ renderer:
   block_dim: [16, 16]
   save_first_frame: true
   first_frame_path: first_frame.png
+bloom:
+  enabled: true
+  intensity: 0.35
+  radius: 48.0
 hud:
   font_name: Consolas
   font_size: 15

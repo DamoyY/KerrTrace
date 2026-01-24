@@ -57,11 +57,17 @@ __device__ __forceinline__ float rand01(unsigned long long state)
 {
     return (float)pcg32(state) * (1.0f / 4294967296.0f);
 }
+__device__ __forceinline__ float gaussian_weight(int x, float sigma)
+{
+    float t = (float)x;
+    float denom = 2.0f * sigma * sigma;
+    return __expf(-(t * t) / denom);
+}
 #include "kerr.cuh"
 extern "C"
 {
-    __global__ __launch_bounds__(1024) void kernel(
-        unsigned int *__restrict__ image_out,
+    __global__ __launch_bounds__(1024) void trace_kernel(
+        float4 *__restrict__ accumulation_buffer,
         int width, int height,
         float cam_x, float cam_y, float cam_z,
         float fwd_x, float fwd_y, float fwd_z,
@@ -114,11 +120,98 @@ extern "C"
         accumulated_color.x *= final_scale;
         accumulated_color.y *= final_scale;
         accumulated_color.z *= final_scale;
-        float3 final_color = srgb_oetf(aces_tone_map(accumulated_color));
         int idx = y * width + x;
-        unsigned int r = (unsigned int)float_to_byte(final_color.x);
-        unsigned int g = (unsigned int)float_to_byte(final_color.y);
-        unsigned int b = (unsigned int)float_to_byte(final_color.z);
+        accumulation_buffer[idx] = make_float4(accumulated_color.x, accumulated_color.y, accumulated_color.z, 1.0f);
+    }
+
+    __global__ __launch_bounds__(1024) void bloom_horizontal(
+        const float4 *__restrict__ accumulation_buffer,
+        float4 *__restrict__ bloom_buffer,
+        int width, int height,
+        int radius,
+        float sigma,
+        int enabled)
+    {
+        int x = blockIdx.x * blockDim.x + threadIdx.x;
+        int y = blockIdx.y * blockDim.y + threadIdx.y;
+        if (x >= width || y >= height)
+            return;
+        int idx = y * width + x;
+        if (!enabled || radius <= 0)
+        {
+            bloom_buffer[idx] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+            return;
+        }
+        float3 accum = make_float3(0.0f, 0.0f, 0.0f);
+        float weight_sum = 0.0f;
+        for (int dx = -radius; dx <= radius; dx++)
+        {
+            int sx = x + dx;
+            if (sx < 0 || sx >= width)
+                continue;
+            float w = gaussian_weight(dx, sigma);
+            float4 c = accumulation_buffer[y * width + sx];
+            accum.x += c.x * w;
+            accum.y += c.y * w;
+            accum.z += c.z * w;
+            weight_sum += w;
+        }
+        if (weight_sum > 0.0f)
+        {
+            accum.x /= weight_sum;
+            accum.y /= weight_sum;
+            accum.z /= weight_sum;
+        }
+        bloom_buffer[idx] = make_float4(accum.x, accum.y, accum.z, 0.0f);
+    }
+
+    __global__ __launch_bounds__(1024) void post_process(
+        const float4 *__restrict__ accumulation_buffer,
+        const float4 *__restrict__ bloom_buffer,
+        unsigned int *__restrict__ image_out,
+        int width, int height,
+        int radius,
+        float sigma,
+        float intensity,
+        int bloom_enabled)
+    {
+        int x = blockIdx.x * blockDim.x + threadIdx.x;
+        int y = blockIdx.y * blockDim.y + threadIdx.y;
+        if (x >= width || y >= height)
+            return;
+        int idx = y * width + x;
+        float4 base = accumulation_buffer[idx];
+        float3 final_color = make_float3(base.x, base.y, base.z);
+        if (bloom_enabled && radius > 0 && intensity > 0.0f)
+        {
+            float3 accum = make_float3(0.0f, 0.0f, 0.0f);
+            float weight_sum = 0.0f;
+            for (int dy = -radius; dy <= radius; dy++)
+            {
+                int sy = y + dy;
+                if (sy < 0 || sy >= height)
+                    continue;
+                float w = gaussian_weight(dy, sigma);
+                float4 c = bloom_buffer[sy * width + x];
+                accum.x += c.x * w;
+                accum.y += c.y * w;
+                accum.z += c.z * w;
+                weight_sum += w;
+            }
+            if (weight_sum > 0.0f)
+            {
+                accum.x /= weight_sum;
+                accum.y /= weight_sum;
+                accum.z /= weight_sum;
+            }
+            final_color.x += accum.x * intensity;
+            final_color.y += accum.y * intensity;
+            final_color.z += accum.z * intensity;
+        }
+        float3 mapped = srgb_oetf(aces_tone_map(final_color));
+        unsigned int r = (unsigned int)float_to_byte(mapped.x);
+        unsigned int g = (unsigned int)float_to_byte(mapped.y);
+        unsigned int b = (unsigned int)float_to_byte(mapped.z);
         image_out[idx] = (r << 16) | (g << 8) | b;
     }
 }

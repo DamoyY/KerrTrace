@@ -1,6 +1,5 @@
 use anyhow::{Result, anyhow};
 use glam::Vec3;
-
 pub fn calculate_camera_basis(yaw: f32, pitch: f32) -> (Vec3, Vec3, Vec3) {
     let yaw_rad = yaw.to_radians();
     let pitch_rad = pitch.to_radians();
@@ -13,7 +12,6 @@ pub fn calculate_camera_basis(yaw: f32, pitch: f32) -> (Vec3, Vec3, Vec3) {
     let up = right.cross(forward).normalize();
     (forward, right, up)
 }
-
 pub fn f32_from_f64(value: f64) -> Result<f32> {
     if !value.is_finite() {
         return Err(anyhow!("数值不是有限值: {value}"));

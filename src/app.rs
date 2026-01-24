@@ -41,7 +41,6 @@ pub struct App {
     fps_frames: u32,
     fps_value: f32,
 }
-
 impl App {
     const FOV_EPSILON: f32 = 1e-4;
     const ROTATION_EPSILON: f32 = 1e-4;

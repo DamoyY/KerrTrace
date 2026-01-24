@@ -5,12 +5,10 @@ use cudarc::{
     driver::CudaStream,
     runtime::{result::RuntimeError, sys as cuda_sys},
 };
-
 pub(super) struct CudaTextureLut {
     pub(super) texture: cuda_sys::cudaTextureObject_t,
     pub(super) array: cuda_sys::cudaArray_t,
 }
-
 impl Drop for CudaTextureLut {
     fn drop(&mut self) {
         let mut errors = Vec::new();
@@ -36,7 +34,6 @@ impl Drop for CudaTextureLut {
         }
     }
 }
-
 pub(super) fn create_lut_texture(
     stream: &CudaStream,
     lut_data: &[f32],
@@ -143,7 +140,6 @@ pub(super) fn create_lut_texture(
     }
     Ok(CudaTextureLut { texture, array })
 }
-
 pub(super) fn create_disk_texture(
     stream: &CudaStream,
     lut_data: &[f32],
@@ -250,7 +246,6 @@ pub(super) fn create_disk_texture(
     }
     Ok(CudaTextureLut { texture, array })
 }
-
 fn cuda_runtime_result(err: cuda_sys::cudaError_t, context: &str) -> Result<()> {
     err.result().map_err(|e| anyhow!("{context}: {e}"))
 }
