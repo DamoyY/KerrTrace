@@ -184,7 +184,7 @@ __device__ float3 trace_ray(
                         float3 d_col = fetch_color_from_lut(fminf(T, max_temp), lut_tex, lut_size, max_temp);
                         float luma = 0.2126f * d_col.x + 0.7152f * d_col.y + 0.0722f * d_col.z;
                         float luma_scaled = luma / CONFIG_BLACKBODY_WAVELENGTH_STEP;
-                        float alpha = luma_scaled / (1.0f + luma_scaled);
+                        float alpha = 1.0f - __expf(-luma_scaled * 0.5f);
                         color.x += d_col.x * alpha * transmittance;
                         color.y += d_col.y * alpha * transmittance;
                         color.z += d_col.z * alpha * transmittance;
