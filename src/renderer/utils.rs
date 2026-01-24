@@ -144,6 +144,23 @@ pub(super) fn build_cuda_defines(config: &KernelConfig, wavelength_step: f32) ->
     output.push('\n');
     output
 }
+fn ensure_finite_f32(value: f32, label: &str) -> Result<f32> {
+    if !value.is_finite() {
+        return Err(anyhow!("{label}不是有限值: {value}"));
+    }
+    Ok(value)
+}
+fn lut_denom_u32(size: usize, label: &str) -> Result<u32> {
+    let denom_usize = size - 1;
+    u32::try_from(denom_usize).map_err(|_| anyhow!("{label}尺寸超出 u32 范围: {size}"))
+}
+fn ratio_from_index(i: usize, denom: u32, label: &str) -> Result<f64> {
+    let i_u32 = u32::try_from(i).map_err(|_| anyhow!("{label}索引超出 u32 范围: {i}"))?;
+    Ok(f64::from(i_u32) / f64::from(denom))
+}
+fn f32_from_f64_with_context(value: f64, label: &str) -> Result<f32> {
+    f32_from_f64(value).map_err(|err| anyhow!("{label}转换失败: {err}"))
+}
 pub(super) fn generate_disk_temperature_lut(
     params: &KerrParams,
     disk_outer: f32,
@@ -153,38 +170,24 @@ pub(super) fn generate_disk_temperature_lut(
         error!("吸积盘温度表尺寸过小: {size}");
         return Err(anyhow!("吸积盘温度表尺寸必须至少为 2"));
     }
-    if !disk_outer.is_finite() {
-        return Err(anyhow!("吸积盘外半径不是有限值: {disk_outer}"));
-    }
-    if !params.disk_inner.is_finite() {
-        return Err(anyhow!("吸积盘内半径不是有限值: {}", params.disk_inner));
-    }
-    if disk_outer <= params.disk_inner {
+    let disk_outer = ensure_finite_f32(disk_outer, "吸积盘外半径")?;
+    let disk_inner = ensure_finite_f32(params.disk_inner, "吸积盘内半径")?;
+    if disk_outer <= disk_inner {
         return Err(anyhow!(
-            "吸积盘外半径必须大于内半径: outer={disk_outer}, inner={}",
-            params.disk_inner
+            "吸积盘外半径必须大于内半径: outer={disk_outer}, inner={disk_inner}"
         ));
     }
-    let denom_usize = size - 1;
-    let denom_u32 =
-        u32::try_from(denom_usize).map_err(|_| anyhow!("吸积盘温度表尺寸超出 u32 范围: {size}"))?;
-    let denom_f = f64::from(denom_u32);
+    let denom_u32 = lut_denom_u32(size, "吸积盘温度表")?;
     let mut data = Vec::with_capacity(size);
-    let inner = f64::from(params.disk_inner);
-    let span = f64::from(disk_outer - params.disk_inner);
+    let inner = f64::from(disk_inner);
+    let span = f64::from(disk_outer - disk_inner);
     for i in 0..size {
-        let i_u32 = u32::try_from(i).map_err(|_| anyhow!("吸积盘温度表索引超出 u32 范围: {i}"))?;
-        let ratio = f64::from(i_u32) / denom_f;
-        let r = f32_from_f64(inner + ratio * span)?;
-        let f = calc_novikov_thorne_factor(r, params.a_norm, params.disk_inner, params.inv_m);
-        if !f.is_finite() {
-            return Err(anyhow!("吸积盘通量因子为非有限值: {f}"));
-        }
+        let ratio = ratio_from_index(i, denom_u32, "吸积盘温度表")?;
+        let r = f32_from_f64_with_context(ratio.mul_add(span, inner), "吸积盘半径")?;
+        let f = calc_novikov_thorne_factor(r, params.a_norm, disk_inner, params.inv_m);
+        let f = ensure_finite_f32(f, "吸积盘通量因子")?;
         let v = f.sqrt().sqrt();
-        if !v.is_finite() {
-            return Err(anyhow!("吸积盘温度因子为非有限值: {v}"));
-        }
-        data.push(v);
+        data.push(ensure_finite_f32(v, "吸积盘温度因子")?);
     }
     Ok(data)
 }
@@ -199,22 +202,21 @@ pub(super) fn generate_blackbody_lut(
         error!("黑体查找表尺寸过小: {size}");
         return Err(anyhow!("黑体查找表尺寸必须至少为 2"));
     }
-    if !wavelength_step.is_finite() || wavelength_step <= 0.0 {
+    let wavelength_step = ensure_finite_f32(wavelength_step, "波长步进").map_err(|_| {
+        error!("波长步进无效: {wavelength_step}");
+        anyhow!("波长步进必须为正数且有限")
+    })?;
+    if wavelength_step <= 0.0 {
         error!("波长步进无效: {wavelength_step}");
         return Err(anyhow!("波长步进必须为正数且有限"));
     }
     let mut lut_data = Vec::with_capacity(size * 4);
-    let denom_usize = size - 1;
-    let denom_u32 =
-        u32::try_from(denom_usize).map_err(|_| anyhow!("黑体查找表尺寸超出 u32 范围: {size}"))?;
-    let denom_f = f64::from(denom_u32);
+    let denom_u32 = lut_denom_u32(size, "黑体查找表")?;
     let temps: Vec<f32> = (0..size)
         .map(|i| {
-            let i_u32 =
-                u32::try_from(i).map_err(|_| anyhow!("黑体查找表索引超出 u32 范围: {i}"))?;
-            let ratio = f64::from(i_u32) / denom_f;
+            let ratio = ratio_from_index(i, denom_u32, "黑体查找表")?;
             let temp = ratio * f64::from(max_temp);
-            f32_from_f64(temp).map_err(|err| anyhow!("温度值转换失败: {err}"))
+            f32_from_f64_with_context(temp, "温度值")
         })
         .collect::<Result<Vec<f32>>>()?;
     let mut lambdas = Vec::new();
