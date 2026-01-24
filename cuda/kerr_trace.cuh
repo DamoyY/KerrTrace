@@ -61,22 +61,24 @@ __device__ float3 trace_ray(
         float error;
         int attempts = 0;
         bool accepted = false;
+        float h_used = h;
         while (!accepted && attempts < CONFIG_INTEGRATOR_MAX_ATTEMPTS)
         {
+            float h_step = h;
             k1 = get_derivs(s, pt);
-            k2 = get_derivs({s.x + h * a21 * k1.dx, s.y + h * a21 * k1.dy, s.z + h * a21 * k1.dz, s.px + h * a21 * k1.dpx, s.py + h * a21 * k1.dpy, s.pz + h * a21 * k1.dpz}, pt);
-            k3 = get_derivs({s.x + h * (a31 * k1.dx + a32 * k2.dx), s.y + h * (a31 * k1.dy + a32 * k2.dy), s.z + h * (a31 * k1.dz + a32 * k2.dz), s.px + h * (a31 * k1.dpx + a32 * k2.dpx), s.py + h * (a31 * k1.dpy + a32 * k2.dpy), s.pz + h * (a31 * k1.dpz + a32 * k2.dpz)}, pt);
-            k4 = get_derivs({s.x + h * (a41 * k1.dx + a42 * k2.dx + a43 * k3.dx), s.y + h * (a41 * k1.dy + a42 * k2.dy + a43 * k3.dy), s.z + h * (a41 * k1.dz + a42 * k2.dz + a43 * k3.dz), s.px + h * (a41 * k1.dpx + a42 * k2.dpx + a43 * k3.dpx), s.py + h * (a41 * k1.dpy + a42 * k2.dpy + a43 * k3.dpy), s.pz + h * (a41 * k1.dpz + a42 * k2.dpz + a43 * k3.dpz)}, pt);
-            k5 = get_derivs({s.x + h * (a51 * k1.dx + a52 * k2.dx + a53 * k3.dx + a54 * k4.dx), s.y + h * (a51 * k1.dy + a52 * k2.dy + a53 * k3.dy + a54 * k4.dy), s.z + h * (a51 * k1.dz + a52 * k2.dz + a53 * k3.dz + a54 * k4.dz), s.px + h * (a51 * k1.dpx + a52 * k2.dpx + a53 * k3.dpx + a54 * k4.dpx), s.py + h * (a51 * k1.dpy + a52 * k2.dpy + a53 * k3.dpy + a54 * k4.dpy), s.pz + h * (a51 * k1.dpz + a52 * k2.dpz + a53 * k3.dpz + a54 * k4.dpz)}, pt);
-            k6 = get_derivs({s.x + h * (a61 * k1.dx + a62 * k2.dx + a63 * k3.dx + a64 * k4.dx + a65 * k5.dx), s.y + h * (a61 * k1.dy + a62 * k2.dy + a63 * k3.dy + a64 * k4.dy + a65 * k5.dy), s.z + h * (a61 * k1.dz + a62 * k2.dz + a63 * k3.dz + a64 * k4.dz + a65 * k5.dz), s.px + h * (a61 * k1.dpx + a62 * k2.dpx + a63 * k3.dpx + a64 * k4.dpx + a65 * k5.dpx), s.py + h * (a61 * k1.dpy + a62 * k2.dpy + a63 * k3.dpy + a64 * k4.dpy + a65 * k5.dpy), s.pz + h * (a61 * k1.dpz + a62 * k2.dpz + a63 * k3.dpz + a64 * k4.dpz + a65 * k5.dpz)}, pt);
-            k7 = get_derivs({s.x + h * (a71 * k1.dx + a73 * k3.dx + a74 * k4.dx + a75 * k5.dx + a76 * k6.dx), s.y + h * (a71 * k1.dy + a73 * k3.dy + a74 * k4.dy + a75 * k5.dy + a76 * k6.dy), s.z + h * (a71 * k1.dz + a73 * k3.dz + a74 * k4.dz + a75 * k5.dz + a76 * k6.dz), s.px + h * (a71 * k1.dpx + a73 * k3.dpx + a74 * k4.dpx + a75 * k5.dpx + a76 * k6.dpx), s.py + h * (a71 * k1.dpy + a73 * k3.dpy + a74 * k4.dpy + a75 * k5.dpy + a76 * k6.dpy), s.pz + h * (a71 * k1.dpz + a73 * k3.dpz + a74 * k4.dpz + a75 * k5.dpz + a76 * k6.dpz)}, pt);
+            k2 = get_derivs({s.x + h_step * a21 * k1.dx, s.y + h_step * a21 * k1.dy, s.z + h_step * a21 * k1.dz, s.px + h_step * a21 * k1.dpx, s.py + h_step * a21 * k1.dpy, s.pz + h_step * a21 * k1.dpz}, pt);
+            k3 = get_derivs({s.x + h_step * (a31 * k1.dx + a32 * k2.dx), s.y + h_step * (a31 * k1.dy + a32 * k2.dy), s.z + h_step * (a31 * k1.dz + a32 * k2.dz), s.px + h_step * (a31 * k1.dpx + a32 * k2.dpx), s.py + h_step * (a31 * k1.dpy + a32 * k2.dpy), s.pz + h_step * (a31 * k1.dpz + a32 * k2.dpz)}, pt);
+            k4 = get_derivs({s.x + h_step * (a41 * k1.dx + a42 * k2.dx + a43 * k3.dx), s.y + h_step * (a41 * k1.dy + a42 * k2.dy + a43 * k3.dy), s.z + h_step * (a41 * k1.dz + a42 * k2.dz + a43 * k3.dz), s.px + h_step * (a41 * k1.dpx + a42 * k2.dpx + a43 * k3.dpx), s.py + h_step * (a41 * k1.dpy + a42 * k2.dpy + a43 * k3.dpy), s.pz + h_step * (a41 * k1.dpz + a42 * k2.dpz + a43 * k3.dpz)}, pt);
+            k5 = get_derivs({s.x + h_step * (a51 * k1.dx + a52 * k2.dx + a53 * k3.dx + a54 * k4.dx), s.y + h_step * (a51 * k1.dy + a52 * k2.dy + a53 * k3.dy + a54 * k4.dy), s.z + h_step * (a51 * k1.dz + a52 * k2.dz + a53 * k3.dz + a54 * k4.dz), s.px + h_step * (a51 * k1.dpx + a52 * k2.dpx + a53 * k3.dpx + a54 * k4.dpx), s.py + h_step * (a51 * k1.dpy + a52 * k2.dpy + a53 * k3.dpy + a54 * k4.dpy), s.pz + h_step * (a51 * k1.dpz + a52 * k2.dpz + a53 * k3.dpz + a54 * k4.dpz)}, pt);
+            k6 = get_derivs({s.x + h_step * (a61 * k1.dx + a62 * k2.dx + a63 * k3.dx + a64 * k4.dx + a65 * k5.dx), s.y + h_step * (a61 * k1.dy + a62 * k2.dy + a63 * k3.dy + a64 * k4.dy + a65 * k5.dy), s.z + h_step * (a61 * k1.dz + a62 * k2.dz + a63 * k3.dz + a64 * k4.dz + a65 * k5.dz), s.px + h_step * (a61 * k1.dpx + a62 * k2.dpx + a63 * k3.dpx + a64 * k4.dpx + a65 * k5.dpx), s.py + h_step * (a61 * k1.dpy + a62 * k2.dpy + a63 * k3.dpy + a64 * k4.dpy + a65 * k5.dpy), s.pz + h_step * (a61 * k1.dpz + a62 * k2.dpz + a63 * k3.dpz + a64 * k4.dpz + a65 * k5.dpz)}, pt);
+            k7 = get_derivs({s.x + h_step * (a71 * k1.dx + a73 * k3.dx + a74 * k4.dx + a75 * k5.dx + a76 * k6.dx), s.y + h_step * (a71 * k1.dy + a73 * k3.dy + a74 * k4.dy + a75 * k5.dy + a76 * k6.dy), s.z + h_step * (a71 * k1.dz + a73 * k3.dz + a74 * k4.dz + a75 * k5.dz + a76 * k6.dz), s.px + h_step * (a71 * k1.dpx + a73 * k3.dpx + a74 * k4.dpx + a75 * k5.dpx + a76 * k6.dpx), s.py + h_step * (a71 * k1.dpy + a73 * k3.dpy + a74 * k4.dpy + a75 * k5.dpy + a76 * k6.dpy), s.pz + h_step * (a71 * k1.dpz + a73 * k3.dpz + a74 * k4.dpz + a75 * k5.dpz + a76 * k6.dpz)}, pt);
             next_s = {
-                s.x + h * (b1 * k1.dx + b3 * k3.dx + b4 * k4.dx + b5 * k5.dx + b6 * k6.dx),
-                s.y + h * (b1 * k1.dy + b3 * k3.dy + b4 * k4.dy + b5 * k5.dy + b6 * k6.dy),
-                s.z + h * (b1 * k1.dz + b3 * k3.dz + b4 * k4.dz + b5 * k5.dz + b6 * k6.dz),
-                s.px + h * (b1 * k1.dpx + b3 * k3.dpx + b4 * k4.dpx + b5 * k5.dpx + b6 * k6.dpx),
-                s.py + h * (b1 * k1.dpy + b3 * k3.dpy + b4 * k4.dpy + b5 * k5.dpy + b6 * k6.dpy),
-                s.pz + h * (b1 * k1.dpz + b3 * k3.dpz + b4 * k4.dpz + b5 * k5.dpz + b6 * k6.dpz)};
+                s.x + h_step * (b1 * k1.dx + b3 * k3.dx + b4 * k4.dx + b5 * k5.dx + b6 * k6.dx),
+                s.y + h_step * (b1 * k1.dy + b3 * k3.dy + b4 * k4.dy + b5 * k5.dy + b6 * k6.dy),
+                s.z + h_step * (b1 * k1.dz + b3 * k3.dz + b4 * k4.dz + b5 * k5.dz + b6 * k6.dz),
+                s.px + h_step * (b1 * k1.dpx + b3 * k3.dpx + b4 * k4.dpx + b5 * k5.dpx + b6 * k6.dpx),
+                s.py + h_step * (b1 * k1.dpy + b3 * k3.dpy + b4 * k4.dpy + b5 * k5.dpy + b6 * k6.dpy),
+                s.pz + h_step * (b1 * k1.dpz + b3 * k3.dpz + b4 * k4.dpz + b5 * k5.dpz + b6 * k6.dpz)};
             float scale_x = tol * fmaxf(fabsf(s.x), 1.0f);
             float scale_y = tol * fmaxf(fabsf(s.y), 1.0f);
             float scale_z = tol * fmaxf(fabsf(s.z), 1.0f);
@@ -92,7 +94,8 @@ __device__ float3 trace_ray(
             error = fmaxf(fmaxf(fmaxf(err_x, err_y), fmaxf(err_z, err_px)), fmaxf(err_py, err_pz));
             if (error <= 1.0f)
                 accepted = true;
-            h = h * 0.9f * __powf(error, -0.2f);
+            h = h_step * 0.9f * __powf(error, -0.2f);
+            h_used = h_step;
             attempts++;
         }
         float prev_x = s.x, prev_y = s.y, prev_z = s.z;
@@ -103,14 +106,35 @@ __device__ float3 trace_ray(
             break;
         if ((prev_y < 0.0f && s.y >= 0.0f) || (prev_y > 0.0f && s.y <= 0.0f))
         {
-            RayDerivs ke = get_derivs(s, pt);
-            float denom_y = s.y - prev_y;
-            float t = denom_y != 0.0f ? __fdividef(-prev_y, denom_y) : 0.0f;
-            float x_hit = lerp_hermite(prev_x, k1.dx * h, s.x, ke.dx * h, t);
-            float z_hit = lerp_hermite(prev_z, k1.dz * h, s.z, ke.dz * h, t);
-            float px_hit = lerp_hermite(prev_px, k1.dpx * h, s.px, ke.dpx * h, t);
-            float py_hit = lerp_hermite(prev_py, k1.dpy * h, s.py, ke.dpy * h, t);
-            float pz_hit = lerp_hermite(prev_pz, k1.dpz * h, s.pz, ke.dpz * h, t);
+            float t_low = 0.0f;
+            float t_high = 1.0f;
+            float y_low = prev_y;
+            for (int j = 0; j < 6; j++)
+            {
+                float t_mid = 0.5f * (t_low + t_high);
+                float y_mid = dp_dense_output(prev_y, s.y, k1.dy, k3.dy, k4.dy, k5.dy, k6.dy, k7.dy, h_used, t_mid);
+                if (y_mid == 0.0f)
+                {
+                    t_low = t_mid;
+                    t_high = t_mid;
+                    break;
+                }
+                if ((y_mid >= 0.0f) == (y_low >= 0.0f))
+                {
+                    t_low = t_mid;
+                    y_low = y_mid;
+                }
+                else
+                {
+                    t_high = t_mid;
+                }
+            }
+            float t = 0.5f * (t_low + t_high);
+            float x_hit = dp_dense_output(prev_x, s.x, k1.dx, k3.dx, k4.dx, k5.dx, k6.dx, k7.dx, h_used, t);
+            float z_hit = dp_dense_output(prev_z, s.z, k1.dz, k3.dz, k4.dz, k5.dz, k6.dz, k7.dz, h_used, t);
+            float px_hit = dp_dense_output(prev_px, s.px, k1.dpx, k3.dpx, k4.dpx, k5.dpx, k6.dpx, k7.dpx, h_used, t);
+            float py_hit = dp_dense_output(prev_py, s.py, k1.dpy, k3.dpy, k4.dpy, k5.dpy, k6.dpy, k7.dpy, h_used, t);
+            float pz_hit = dp_dense_output(prev_pz, s.pz, k1.dpz, k3.dpz, k4.dpz, k5.dpz, k6.dpz, k7.dpz, h_used, t);
             float r_hit = ks_r_from_xyz(x_hit, 0.0f, z_hit, p.aa);
             if (r_hit >= disk_inner && r_hit <= disk_outer)
             {
