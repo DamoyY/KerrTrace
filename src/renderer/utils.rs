@@ -15,6 +15,46 @@ fn calc_isco(a_norm: f32, prograde: bool, mass: f32) -> f32 {
     let term_inside = (3.0 - z1) * (2.0f32.mul_add(z2, 3.0 + z1));
     mass * (3.0 + z2 + sign * term_inside.max(0.0).sqrt())
 }
+fn calc_novikov_thorne_factor(r: f32, a_norm: f32, r_isco: f32, inv_m: f32) -> f32 {
+    if r <= r_isco {
+        return 0.0;
+    }
+    let mut a_norm = a_norm;
+    if a_norm.abs() < 1e-8 {
+        a_norm = if a_norm >= 0.0 { 1e-8 } else { -1e-8 };
+    }
+    let r_norm = r * inv_m;
+    let r_isco_norm = r_isco * inv_m;
+    let x = r_norm.sqrt();
+    let x_ms = r_isco_norm.sqrt();
+    let angle_base = (-a_norm).acos() * (1.0 / 3.0);
+    let ang_step = 2.094_395_2_f32;
+    let roots = [
+        2.0 * angle_base.cos(),
+        2.0 * (angle_base - ang_step).cos(),
+        2.0 * (angle_base + ang_step).cos(),
+    ];
+    let mut sum_log = 0.0f32;
+    for i in 0..3 {
+        let xi = roots[i];
+        let denom = xi * (xi - roots[(i + 1) % 3]) * (xi - roots[(i + 2) % 3]);
+        if denom.abs() < 1e-8 {
+            continue;
+        }
+        let coef = 3.0 * (xi - a_norm) * (xi - a_norm) / denom;
+        let val = (x - xi) / (x_ms - xi);
+        if val > 0.0 {
+            sum_log += coef * val.ln();
+        }
+    }
+    let q = (1.5 * a_norm).mul_add(-(x / x_ms).ln(), x - x_ms) - sum_log;
+    let geometric_denom = r_norm * (2.0f32).mul_add(a_norm, r_norm.mul_add(x, -(3.0 * x)));
+    if geometric_denom < 1e-8 {
+        0.0
+    } else {
+        (q / geometric_denom).max(0.0)
+    }
+}
 pub(super) fn build_kerr_params(config: &KernelConfig) -> Result<KerrParams> {
     let spin = config.black_hole.spin;
     let mass = config.black_hole.mass;
@@ -92,6 +132,50 @@ pub(super) fn build_cuda_defines(config: &KernelConfig) -> String {
     let mut output = lines.join("\n");
     output.push('\n');
     output
+}
+pub(super) fn generate_disk_temperature_lut(
+    params: &KerrParams,
+    disk_outer: f32,
+    size: usize,
+) -> Result<Vec<f32>> {
+    if size < 2 {
+        error!("吸积盘温度表尺寸过小: {size}");
+        return Err(anyhow!("吸积盘温度表尺寸必须至少为 2"));
+    }
+    if !disk_outer.is_finite() {
+        return Err(anyhow!("吸积盘外半径不是有限值: {disk_outer}"));
+    }
+    if !params.disk_inner.is_finite() {
+        return Err(anyhow!("吸积盘内半径不是有限值: {}", params.disk_inner));
+    }
+    if disk_outer <= params.disk_inner {
+        return Err(anyhow!(
+            "吸积盘外半径必须大于内半径: outer={disk_outer}, inner={}",
+            params.disk_inner
+        ));
+    }
+    let denom_usize = size - 1;
+    let denom_u32 =
+        u32::try_from(denom_usize).map_err(|_| anyhow!("吸积盘温度表尺寸超出 u32 范围: {size}"))?;
+    let denom_f = f64::from(denom_u32);
+    let mut data = Vec::with_capacity(size);
+    let inner = f64::from(params.disk_inner);
+    let span = f64::from(disk_outer - params.disk_inner);
+    for i in 0..size {
+        let i_u32 = u32::try_from(i).map_err(|_| anyhow!("吸积盘温度表索引超出 u32 范围: {i}"))?;
+        let ratio = f64::from(i_u32) / denom_f;
+        let r = f32_from_f64_checked(inner + ratio * span)?;
+        let f = calc_novikov_thorne_factor(r, params.a_norm, params.disk_inner, params.inv_m);
+        if !f.is_finite() {
+            return Err(anyhow!("吸积盘通量因子为非有限值: {f}"));
+        }
+        let v = f.sqrt().sqrt();
+        if !v.is_finite() {
+            return Err(anyhow!("吸积盘温度因子为非有限值: {v}"));
+        }
+        data.push(v);
+    }
+    Ok(data)
 }
 pub(super) fn generate_blackbody_lut(
     size: usize,

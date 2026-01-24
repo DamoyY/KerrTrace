@@ -98,7 +98,15 @@ __device__ __forceinline__ float3 get_sky_color(float3 dir, float transmittance)
     float intensity = is_grid ? CONFIG_SKY_INTENSITY * transmittance : 0.0f;
     return make_float3(intensity, intensity, intensity);
 }
-__device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, cudaTextureObject_t lut_tex, int lut_size, float max_temp)
+__device__ float3 trace_ray(
+    float3 cam_pos,
+    float3 ray_dir,
+    cudaTextureObject_t lut_tex,
+    int lut_size,
+    float max_temp,
+    cudaTextureObject_t disk_tex,
+    float disk_inner,
+    float disk_outer)
 {
     const KerrParams &p = c_params;
     float3 ray_n = normalize(ray_dir);
@@ -191,14 +199,17 @@ __device__ float3 trace_ray(float3 cam_pos, float3 ray_dir, cudaTextureObject_t 
             float t = (1.570796327f - prev_th) / (s.theta - prev_th + 1e-8f);
             float t2 = t * t, t3 = t2 * t;
             float r_hit = (2 * t3 - 3 * t2 + 1) * prev_r + (t3 - 2 * t2 + t) * (k1.dr * h) + (-2 * t3 + 3 * t2) * s.r + (t3 - t2) * (ke.dr * h);
-            if (r_hit >= p.disk_inner && r_hit <= CONFIG_DISK_OUTER_RADIUS)
+            if (r_hit >= disk_inner && r_hit <= disk_outer)
             {
                 float sqrt_M = __fsqrt_rn(p.M), r_sqrt = __fsqrt_rn(r_hit);
                 float disc_denom = 1.0f - 3.0f * p.M / r_hit + 2.0f * p.a * sqrt_M / (r_hit * r_sqrt);
                 if (disc_denom > 1e-8f)
                 {
                     float g = 1.0f / (rsqrtf(disc_denom) * (1.0f - (-sqrt_M / (r_hit * r_sqrt + p.a * sqrt_M)) * s.pph));
-                    float T = CONFIG_DISK_TEMPERATURE_SCALE * __fsqrt_rn(__fsqrt_rn(calc_novikov_thorne_factor(r_hit, p.A_norm, p.disk_inner, p.inv_M))) * g;
+                    float denom = disk_outer - disk_inner;
+                    float u = denom > 0.0f ? (r_hit - disk_inner) / denom : 0.0f;
+                    float sampled = tex1D<float>(disk_tex, u);
+                    float T = CONFIG_DISK_TEMPERATURE_SCALE * sampled * g;
                     if (isfinite(T) && T > 0.0f)
                     {
                         float3 d_col = fetch_color_from_lut(fminf(T, max_temp), lut_tex, lut_size, max_temp);

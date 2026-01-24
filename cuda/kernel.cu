@@ -34,6 +34,7 @@ extern "C"
         float rgt_x, float rgt_y, float rgt_z,
         float up_x, float up_y, float up_z,
         cudaTextureObject_t lut_tex, int lut_size, float max_temp,
+        cudaTextureObject_t disk_tex, float disk_inner, float disk_outer,
         float fov_scale)
     {
         int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -71,7 +72,15 @@ extern "C"
 #pragma unroll
             for (int sx = 0; sx < SSAA_SAMPLES; sx++)
             {
-                float3 sample_color = trace_ray(cam_pos, current_ray, lut_tex, lut_size, max_temp);
+                float3 sample_color = trace_ray(
+                    cam_pos,
+                    current_ray,
+                    lut_tex,
+                    lut_size,
+                    max_temp,
+                    disk_tex,
+                    disk_inner,
+                    disk_outer);
                 accumulated_color.x += sample_color.x;
                 accumulated_color.y += sample_color.y;
                 accumulated_color.z += sample_color.z;
