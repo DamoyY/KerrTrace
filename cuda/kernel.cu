@@ -8,7 +8,7 @@ __device__ __forceinline__ float3 fetch_color_from_lut(float T, cudaTextureObjec
         }
         return make_float3(0.0f, 0.0f, 0.0f);
     }
-    float t_norm = fmaxf(T, 0.0f) / max_temp;
+    float t_norm = T / max_temp;
     float pos = t_norm * (float)(lut_size - 1);
     float u = (pos + 0.5f) / (float)lut_size;
     float4 c = tex1D<float4>(lut_tex, u);
