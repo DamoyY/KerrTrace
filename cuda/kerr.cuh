@@ -37,8 +37,6 @@ __device__ float calc_novikov_thorne_factor(float r, float A_norm, float r_isco,
 {
     if (r <= r_isco)
         return 0.0f;
-    if (fabsf(A_norm) < 1e-8f)
-        A_norm = (A_norm >= 0 ? 1e-8f : -1e-8f);
     float R_norm = r * inv_M;
     float R_isco_norm = r_isco * inv_M;
     float x = __fsqrt_rn(R_norm);
@@ -61,18 +59,18 @@ __device__ float calc_novikov_thorne_factor(float r, float A_norm, float r_isco,
     }
     float Q = (x - x_ms) - 1.5f * A_norm * __logf(__fdividef(x, x_ms)) - sum_log;
     float geometric_denom = R_norm * (R_norm * x - 3.0f * x + 2.0f * A_norm);
-    return geometric_denom < 1e-8f ? 0.0f : fmaxf(__fdividef(Q, geometric_denom), 0.0f);
+    return geometric_denom <= 0.0f ? 0.0f : __fdividef(Q, geometric_denom), 0.0f;
 }
 __device__ __forceinline__ RayDerivs get_derivs(const RayState &s)
 {
     const KerrParams &p = c_params;
     float sin_th, cos_th;
     __sincosf(s.theta, &sin_th, &cos_th);
-    float s2 = fmaxf(sin_th * sin_th, 1e-8f);
+    float s2 = sin_th * sin_th;
     float Sigma = s.r * s.r + p.aa * cos_th * cos_th;
     float Delta = s.r * s.r - 2.0f * p.M * s.r + p.aa;
-    float inv_Sigma = __fdividef(1.0f, Sigma + 1e-8f);
-    float inv_Delta = __fdividef(1.0f, fmaxf(Delta, 1e-8f));
+    float inv_Sigma = __fdividef(1.0f, Sigma);
+    float inv_Delta = __fdividef(1.0f, Delta);
     float K = (s.r * s.r + p.aa) - p.a * s.pph;
     RayDerivs d;
     d.dr = inv_Sigma * Delta * s.pr;
@@ -126,24 +124,23 @@ __device__ float3 trace_ray(
     s.r = r_init;
     s.theta = th_init;
     s.phi = ph_init;
-    float s2 = fmaxf(st * st, 1e-8f);
+    float s2 = st * st;
     float r2 = s.r * s.r;
     float Sigma = r2 + p.aa * ct * ct;
     float Delta = r2 - 2.0f * p.M * s.r + p.aa;
     float r2_a2 = r2 + p.aa;
     float A = r2_a2 * r2_a2 - p.aa * Delta * s2;
-    float inv_A = __fdividef(1.0f, fmaxf(A, 1e-8f));
-    float alpha = __fsqrt_rn(fmaxf(Sigma * Delta * inv_A, 1e-8f));
+    float inv_A = __fdividef(1.0f, A);
+    float alpha = __fsqrt_rn(Sigma * Delta * inv_A);
     float omega = (2.0f * p.M * s.r * p.a) * inv_A;
-    float sqrt_Sigma = __fsqrt_rn(fmaxf(Sigma, 1e-8f));
-    float sqrt_Delta = __fsqrt_rn(fmaxf(Delta, 1e-8f));
-    float sqrt_A = __fsqrt_rn(fmaxf(A, 1e-8f));
+    float sqrt_Sigma = __fsqrt_rn(Sigma);
+    float sqrt_Delta = __fsqrt_rn(Delta);
+    float sqrt_A = __fsqrt_rn(A);
     float pr_cov = __fdividef(sqrt_Sigma, sqrt_Delta) * v_r_loc;
     float pth_cov = sqrt_Sigma * v_th_loc;
     float pph_cov = __fdividef(sqrt_A, sqrt_Sigma) * st * v_ph_loc;
     float E = alpha + omega * pph_cov;
-    float abs_E = fabsf(E);
-    float inv_E = __fdividef(1.0f, abs_E < 1e-8f ? (E >= 0.0f ? 1e-8f : -1e-8f) : E);
+    float inv_E = __fdividef(1.0f, E);
     s.pr = pr_cov * inv_E;
     s.pth = pth_cov * inv_E;
     s.pph = pph_cov * inv_E;
@@ -180,13 +177,13 @@ __device__ float3 trace_ray(
                 s.pr + h * (b1 * k1.dpr + b3 * k3.dpr + b4 * k4.dpr + b6 * k6.dpr),
                 s.pth + h * (b1 * k1.dpth + b3 * k3.dpth + b4 * k4.dpth + b6 * k6.dpth),
                 s.pph};
-            error = fmaxf(fmaxf(fabsf(h * (dc1 * k1.dr + dc3 * k3.dr + dc4 * k4.dr + dc5 * k5.dr + dc6 * k6.dr)) / (1e-8f + tol * fabsf(s.r)),
-                                fabsf(h * (dc1 * k1.dth + dc3 * k3.dth + dc4 * k4.dth + dc5 * k5.dth + dc6 * k6.dth)) / (1e-8f + tol * fabsf(s.theta))),
-                          fmaxf(fabsf(h * (dc1 * k1.dpr + dc3 * k3.dpr + dc4 * k4.dpr + dc5 * k5.dpr + dc6 * k6.dpr)) / (1e-8f + tol * fabsf(s.pr)),
-                                fmaxf(fabsf(h * (dc1 * k1.dpth + dc3 * k3.dpth + dc4 * k4.dpth + dc5 * k5.dpth + dc6 * k6.dpth)) / (1e-8f + tol * fabsf(s.pth)), 1e-8f)));
+            error = fmaxf(fmaxf(fabsf(h * (dc1 * k1.dr + dc3 * k3.dr + dc4 * k4.dr + dc5 * k5.dr + dc6 * k6.dr)) / (tol * fabsf(s.r)),
+                                fabsf(h * (dc1 * k1.dth + dc3 * k3.dth + dc4 * k4.dth + dc5 * k5.dth + dc6 * k6.dth)) / (tol * fabsf(s.theta))),
+                          fmaxf(fabsf(h * (dc1 * k1.dpr + dc3 * k3.dpr + dc4 * k4.dpr + dc5 * k5.dpr + dc6 * k6.dpr)) / (tol * fabsf(s.pr)),
+                                fabsf(h * (dc1 * k1.dpth + dc3 * k3.dpth + dc4 * k4.dpth + dc5 * k5.dpth + dc6 * k6.dpth)) / (tol * fabsf(s.pth))));
             if (error <= 1.0f)
                 accepted = true;
-            h = fmaxf(h * 0.9f * __powf(fmaxf(error, 1e-8f), -0.2f), 1e-8f);
+            h = h * 0.9f * __powf(error, -0.2f);
             attempts++;
         }
         float prev_r = s.r, prev_th = s.theta;
@@ -196,14 +193,14 @@ __device__ float3 trace_ray(
         if ((prev_th < 1.570796327f && s.theta >= 1.570796327f) || (prev_th > 1.570796327f && s.theta <= 1.570796327f))
         {
             RayDerivs ke = get_derivs(s);
-            float t = (1.570796327f - prev_th) / (s.theta - prev_th + 1e-8f);
+            float t = (1.570796327f - prev_th) / (s.theta - prev_th);
             float t2 = t * t, t3 = t2 * t;
             float r_hit = (2 * t3 - 3 * t2 + 1) * prev_r + (t3 - 2 * t2 + t) * (k1.dr * h) + (-2 * t3 + 3 * t2) * s.r + (t3 - t2) * (ke.dr * h);
             if (r_hit >= disk_inner && r_hit <= disk_outer)
             {
                 float sqrt_M = __fsqrt_rn(p.M), r_sqrt = __fsqrt_rn(r_hit);
                 float disc_denom = 1.0f - 3.0f * p.M / r_hit + 2.0f * p.a * sqrt_M / (r_hit * r_sqrt);
-                if (disc_denom > 1e-8f)
+                if (disc_denom > 0.0f)
                 {
                     float g = 1.0f / (rsqrtf(disc_denom) * (1.0f - (-sqrt_M / (r_hit * r_sqrt + p.a * sqrt_M)) * s.pph));
                     float denom = disk_outer - disk_inner;

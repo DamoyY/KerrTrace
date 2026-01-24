@@ -19,10 +19,6 @@ fn calc_novikov_thorne_factor(r: f32, a_norm: f32, r_isco: f32, inv_m: f32) -> f
     if r <= r_isco {
         return 0.0;
     }
-    let mut a_norm = a_norm;
-    if a_norm.abs() < 1e-8 {
-        a_norm = if a_norm >= 0.0 { 1e-8 } else { -1e-8 };
-    }
     let r_norm = r * inv_m;
     let r_isco_norm = r_isco * inv_m;
     let x = r_norm.sqrt();
@@ -38,7 +34,7 @@ fn calc_novikov_thorne_factor(r: f32, a_norm: f32, r_isco: f32, inv_m: f32) -> f
     for i in 0..3 {
         let xi = roots[i];
         let denom = xi * (xi - roots[(i + 1) % 3]) * (xi - roots[(i + 2) % 3]);
-        if denom.abs() < 1e-8 {
+        if denom <= 0.0 {
             continue;
         }
         let coef = 3.0 * (xi - a_norm) * (xi - a_norm) / denom;
@@ -49,11 +45,7 @@ fn calc_novikov_thorne_factor(r: f32, a_norm: f32, r_isco: f32, inv_m: f32) -> f
     }
     let q = (1.5 * a_norm).mul_add(-(x / x_ms).ln(), x - x_ms) - sum_log;
     let geometric_denom = r_norm * (2.0f32).mul_add(a_norm, r_norm.mul_add(x, -(3.0 * x)));
-    if geometric_denom < 1e-8 {
-        0.0
-    } else {
-        (q / geometric_denom).max(0.0)
-    }
+    (q / geometric_denom).max(0.0)
 }
 pub(super) fn build_kerr_params(config: &KernelConfig) -> Result<KerrParams> {
     let spin = config.black_hole.spin;
@@ -264,7 +256,7 @@ fn get_xyz_sensitivity(lambdas: &[f32]) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
 fn planck_law(lambdas: &[f32], t: f32) -> Vec<f32> {
     let c2 = 1.4388e7;
     let mut val = Vec::with_capacity(lambdas.len());
-    if t < 1e-8 {
+    if t <= 0.0 {
         return vec![0.0; lambdas.len()];
     }
     for &l in lambdas {
