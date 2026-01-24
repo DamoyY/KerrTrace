@@ -1,11 +1,14 @@
 mod app;
 mod hud;
 mod renderer;
-use std::{fs::File, path::Path};
+use std::{fmt, fs::File, path::Path};
 
 use anyhow::{Context, Result};
 use app::App;
-use serde::Deserialize;
+use serde::{
+    Deserialize,
+    de::{self, Deserializer, Visitor},
+};
 use winit::event_loop::{ControlFlow, EventLoop};
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
@@ -43,7 +46,6 @@ pub struct ControlsConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct RendererConfig {
     pub block_dim: [u32; 2],
-    pub position_epsilon: f32,
     pub save_first_frame: bool,
     pub first_frame_path: String,
 }
@@ -94,11 +96,79 @@ pub struct DiskConfig {
 pub struct IntegratorConfig {
     pub initial_step: f32,
     pub tolerance: f32,
+    #[serde(deserialize_with = "deserialize_u32_scientific")]
     pub max_steps: u32,
     pub max_attempts: u32,
     pub transmittance_cutoff: f32,
     pub horizon_epsilon: f32,
     pub escape_radius: f32,
+}
+fn deserialize_u32_scientific<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct U32Visitor;
+    impl Visitor<'_> for U32Visitor {
+        type Value = u32;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a non-negative integer")
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            u32::try_from(value).map_err(|_| E::custom("integer out of range for u32"))
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if value < 0 {
+                return Err(E::custom("integer must be non-negative"));
+            }
+            u32::try_from(value).map_err(|_| E::custom("integer out of range for u32"))
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if !value.is_finite() {
+                return Err(E::custom("number must be finite"));
+            }
+            if value.fract() != 0.0 {
+                return Err(E::custom("number must be an integer"));
+            }
+            if value < 0.0 || value > f64::from(u32::MAX) {
+                return Err(E::custom("number out of range for u32"));
+            }
+            value
+                .to_string()
+                .parse::<u32>()
+                .map_err(|_| E::custom("number out of range for u32"))
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            let parsed: f64 = value
+                .parse()
+                .map_err(|_| E::custom("failed to parse number"))?;
+            self.visit_f64(parsed)
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(&value)
+        }
+    }
+    deserializer.deserialize_any(U32Visitor)
 }
 fn load_config<P: AsRef<Path>>(path: P) -> Result<Config> {
     let file = File::open(path).context("Failed to open config file")?;

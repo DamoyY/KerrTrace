@@ -47,7 +47,11 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                self.update_camera();
+                if let Err(err) = self.update_camera() {
+                    error!("Camera update failed: {err:?}");
+                    event_loop.exit();
+                    return;
+                }
                 if let Err(e) = self.render() {
                     error!("Render failed: {e:?}");
                 }

@@ -14,9 +14,9 @@ use softbuffer::{Context as SoftContext, Surface};
 use winit::{keyboard::KeyCode, window::Window};
 
 use crate::{
+    Config,
     hud::{self, HudLayout, TextStyle, draw_hud},
     renderer::CudaRenderer,
-    Config,
 };
 pub struct App {
     config: Config,
@@ -93,7 +93,7 @@ impl App {
         Ok(())
     }
 
-    fn update_camera(&mut self) {
+    fn update_camera(&mut self) -> Result<()> {
         let (fwd, rgt, _up) = calculate_camera_basis(self.cam_yaw, self.cam_pitch);
         let mut speed = self.config.controls.move_speed;
         if self.keys_pressed.contains(&KeyCode::ShiftLeft) {
@@ -117,6 +117,27 @@ impl App {
         if self.keys_pressed.contains(&KeyCode::ControlLeft) {
             self.cam_pos.y -= speed;
         }
+        self.clamp_camera_to_escape_radius()?;
+        Ok(())
+    }
+
+    fn clamp_camera_to_escape_radius(&mut self) -> Result<()> {
+        if !self.cam_pos.is_finite() {
+            return Err(anyhow!("摄像机位置不是有限值"));
+        }
+        let escape_radius = self.config.kernel.integrator.escape_radius;
+        if !escape_radius.is_finite() || escape_radius <= 0.0 {
+            return Err(anyhow!("escape_radius 无效: {escape_radius}"));
+        }
+        let dist = self.cam_pos.length();
+        if !dist.is_finite() {
+            return Err(anyhow!("摄像机距离不是有限值: {dist}"));
+        }
+        if dist > escape_radius {
+            let scale = escape_radius / dist;
+            self.cam_pos *= scale;
+        }
+        Ok(())
     }
 
     fn render(&mut self) -> Result<()> {
@@ -126,8 +147,8 @@ impl App {
         if self.renderer.is_none() || self.surface.is_none() {
             return Ok(());
         }
-        self.update_render_if_needed()?;
-        self.update_fps();
+        let rendered = self.update_render_if_needed()?;
+        self.update_fps(rendered);
         self.present_frame()?;
         self.throttle_if_needed();
         if let Some(window) = self.window.as_ref() {
@@ -136,9 +157,9 @@ impl App {
         Ok(())
     }
 
-    fn update_render_if_needed(&mut self) -> Result<()> {
+    fn update_render_if_needed(&mut self) -> Result<bool> {
         if !self.should_render() {
-            return Ok(());
+            return Ok(false);
         }
         let (fwd, rgt, up) = calculate_camera_basis(self.cam_yaw, self.cam_pitch);
         let fov_scale = (self.fov.to_radians() / 2.0).tan();
@@ -169,7 +190,7 @@ impl App {
         self.prev_cam_yaw = self.cam_yaw;
         self.prev_cam_pitch = self.cam_pitch;
         self.prev_fov = self.fov;
-        Ok(())
+        Ok(true)
     }
 
     fn should_render(&self) -> bool {
@@ -177,7 +198,7 @@ impl App {
             return true;
         }
         let position_delta = (self.cam_pos - self.prev_cam_pos).length();
-        if position_delta > self.config.renderer.position_epsilon {
+        if position_delta > 0.0 {
             return true;
         }
         let rotation_changed = (self.cam_yaw - self.prev_cam_yaw).abs() > Self::ROTATION_EPSILON
@@ -246,17 +267,23 @@ impl App {
         })
     }
 
-    fn update_fps(&mut self) {
-        self.fps_frames += 1;
+    fn update_fps(&mut self, rendered: bool) {
+        if rendered {
+            self.fps_frames += 1;
+        }
         let elapsed = self.fps_last_instant.elapsed();
         if elapsed >= Duration::from_secs(1) {
             let elapsed_secs = elapsed.as_secs_f64();
-            let fps = f64::from(self.fps_frames) / elapsed_secs;
-            match f32_from_f64(fps) {
-                Ok(value) => self.fps_value = value,
-                Err(err) => {
-                    error!("FPS 计算失败: {err}");
-                    self.fps_value = 0.0;
+            if self.fps_frames == 0 {
+                self.fps_value = 0.0;
+            } else {
+                let fps = f64::from(self.fps_frames) / elapsed_secs;
+                match f32_from_f64(fps) {
+                    Ok(value) => self.fps_value = value,
+                    Err(err) => {
+                        error!("FPS 计算失败: {err}");
+                        self.fps_value = 0.0;
+                    }
                 }
             }
             self.fps_frames = 0;

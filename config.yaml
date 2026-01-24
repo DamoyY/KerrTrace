@@ -16,8 +16,6 @@ controls:
   mouse_sensitivity: 0.06
 renderer:
   block_dim: [16, 16]
-  position_epsilon: 0.00001
-  spin: 0.25
   save_first_frame: false
   first_frame_path: first_frame.png
 hud:
@@ -30,7 +28,7 @@ hud:
   color: [255, 255, 255, 255]
 blackbody:
   lut_size: 4096
-  lut_max_temp: 100000.0
+  lut_max_temp: 1e5
   wavelength_start: 380.0
   wavelength_end: 720.0
   wavelength_step: 10.0
@@ -41,19 +39,19 @@ kernel:
   exposure_scale: 0.06
   sky:
     grid_divisions: 40
-    line_thickness: 0.0005
+    line_thickness: 5e-4
     intensity: 5.0
   black_hole:
     spin: -0.45
     mass: 0.5
   disk:
-    outer_radius: 1000.0
-    temperature_scale: 30000.0
+    outer_radius: 40.0
+    temperature_scale: 3e4
   integrator:
-    initial_step: 1.0
-    tolerance: 0.0001
-    max_steps: 100
-    max_attempts: 50
-    transmittance_cutoff: 0.001
-    horizon_epsilon: 0.0000005
-    escape_radius: 1000.0
+    initial_step: 1e0
+    tolerance: 1e-5
+    max_steps: 1e2
+    max_attempts: 3
+    transmittance_cutoff: 1e-2
+    horizon_epsilon: 5e-7
+    escape_radius: 80.0
