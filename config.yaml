@@ -17,7 +17,7 @@ controls:
 renderer:
   block_dim: [16, 16]
   save_first_frame: true
-  first_frame_path: first_frame.png
+  first_frame_path: picture/first_frame.png
 bloom:
   enabled: true
   intensity: 0.5

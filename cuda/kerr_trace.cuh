@@ -45,7 +45,10 @@ __device__ float3 trace_ray(
     float3 color = make_float3(0.0f, 0.0f, 0.0f);
     float transmittance = 1.0f;
     float h = CONFIG_INTEGRATOR_INITIAL_STEP;
-    const float tol = CONFIG_INTEGRATOR_TOLERANCE;
+    const float base_tol = CONFIG_INTEGRATOR_TOLERANCE;
+    const float tol_max_scale = 5.0f;
+    const float tol_potential_near = 0.3f;
+    const float tol_potential_far = 0.05f;
     static const float a21 = 1.0f / 5.0f;
     static const float a31 = 3.0f / 40.0f, a32 = 9.0f / 40.0f;
     static const float a41 = 44.0f / 45.0f, a42 = -56.0f / 15.0f, a43 = 32.0f / 9.0f;
@@ -59,6 +62,12 @@ __device__ float3 trace_ray(
         RayDerivs k1, k2, k3, k4, k5, k6, k7;
         RayState next_s;
         float error;
+        float r_curr = ks_r_from_xyz(s.x, s.y, s.z, p.aa);
+        float r2_curr = r_curr * r_curr;
+        float denomH = fmaf(r2_curr, r2_curr, p.aa * s.y * s.y);
+        float H = p.M * r_curr * r2_curr * __fdividef(1.0f, denomH);
+        float t = __fdividef(H - tol_potential_far, tol_potential_near - tol_potential_far);
+        float tol = base_tol * (tol_max_scale - tol_max_scale * t);
         int attempts = 0;
         bool accepted = false;
         while (!accepted && attempts < CONFIG_INTEGRATOR_MAX_ATTEMPTS)
@@ -77,12 +86,12 @@ __device__ float3 trace_ray(
                 s.px + h * (b1 * k1.dpx + b3 * k3.dpx + b4 * k4.dpx + b5 * k5.dpx + b6 * k6.dpx),
                 s.py + h * (b1 * k1.dpy + b3 * k3.dpy + b4 * k4.dpy + b5 * k5.dpy + b6 * k6.dpy),
                 s.pz + h * (b1 * k1.dpz + b3 * k3.dpz + b4 * k4.dpz + b5 * k5.dpz + b6 * k6.dpz)};
-            float scale_x = tol * fabsf(s.x);
-            float scale_y = tol * fabsf(s.y);
-            float scale_z = tol * fabsf(s.z);
-            float scale_px = tol * fabsf(s.px);
-            float scale_py = tol * fabsf(s.py);
-            float scale_pz = tol * fabsf(s.pz);
+            float scale_x = tol * fmaxf(fabsf(s.x), 1.0f);
+            float scale_y = tol * fmaxf(fabsf(s.y), 1.0f);
+            float scale_z = tol * fmaxf(fabsf(s.z), 1.0f);
+            float scale_px = tol * fmaxf(fabsf(s.px), 1.0f);
+            float scale_py = tol * fmaxf(fabsf(s.py), 1.0f);
+            float scale_pz = tol * fmaxf(fabsf(s.pz), 1.0f);
             float err_x = fabsf(h * (dc1 * k1.dx + dc3 * k3.dx + dc4 * k4.dx + dc5 * k5.dx + dc6 * k6.dx + dc7 * k7.dx)) / scale_x;
             float err_y = fabsf(h * (dc1 * k1.dy + dc3 * k3.dy + dc4 * k4.dy + dc5 * k5.dy + dc6 * k6.dy + dc7 * k7.dy)) / scale_y;
             float err_z = fabsf(h * (dc1 * k1.dz + dc3 * k3.dz + dc4 * k4.dz + dc5 * k5.dz + dc6 * k6.dz + dc7 * k7.dz)) / scale_z;
