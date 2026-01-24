@@ -19,6 +19,21 @@ __device__ __forceinline__ float3 aces_tone_map(float3 x)
     res.z = (x.z * (a * x.z + b)) / (x.z * (c * x.z + d) + e);
     return res;
 }
+__device__ __forceinline__ float srgb_oetf(float x)
+{
+    x = fmaxf(x, 0.0f);
+    if (x <= 0.0031308f)
+        return 12.92f * x;
+    return 1.055f * powf(x, 0.4166666666666667f) - 0.055f;
+}
+__device__ __forceinline__ float3 srgb_oetf(float3 x)
+{
+    float3 res;
+    res.x = srgb_oetf(x.x);
+    res.y = srgb_oetf(x.y);
+    res.z = srgb_oetf(x.z);
+    return res;
+}
 __device__ unsigned char float_to_byte(float val)
 {
     return (unsigned char)__float2int_rn(__saturatef(val) * 255.0f);
@@ -90,7 +105,7 @@ extern "C"
         accumulated_color.x *= final_scale;
         accumulated_color.y *= final_scale;
         accumulated_color.z *= final_scale;
-        float3 final_color = aces_tone_map(accumulated_color);
+        float3 final_color = srgb_oetf(aces_tone_map(accumulated_color));
         int idx = y * width + x;
         unsigned int r = (unsigned int)float_to_byte(final_color.x);
         unsigned int g = (unsigned int)float_to_byte(final_color.y);
