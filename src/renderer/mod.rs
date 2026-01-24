@@ -140,6 +140,7 @@ impl CudaRenderer {
         }
         let bloom_active =
             self.bloom_enabled && self.bloom_radius_int > 0 && self.bloom_intensity > 0.0;
+        let bloom_sigma = self.bloom_radius / 3.0;
         let bloom_flag = i32::from(bloom_active);
         if bloom_active {
             unsafe {
@@ -150,7 +151,7 @@ impl CudaRenderer {
                     .arg(&width)
                     .arg(&height)
                     .arg(&self.bloom_radius_int)
-                    .arg(&self.bloom_radius)
+                    .arg(&bloom_sigma)
                     .arg(&bloom_flag)
                     .launch(launch_config)
                     .context("Failed to launch bloom kernel")?;
@@ -165,7 +166,7 @@ impl CudaRenderer {
                 .arg(&width)
                 .arg(&height)
                 .arg(&self.bloom_radius_int)
-                .arg(&self.bloom_radius)
+                .arg(&bloom_sigma)
                 .arg(&self.bloom_intensity)
                 .arg(&bloom_flag)
                 .launch(launch_config)
