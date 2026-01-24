@@ -35,7 +35,7 @@ blackbody:
 cuda:
   use_fast_math: true
 kernel:
-  spp: 3
+  spp: 4
   exposure_scale: 0.06
   sky:
     grid_divisions: 40

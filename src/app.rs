@@ -36,7 +36,7 @@ pub struct App {
     keys_pressed: HashSet<KeyCode>,
     mouse_locked: bool,
     last_present: Instant,
-    last_frame: Option<Vec<u8>>,
+    last_frame: Option<Vec<u32>>,
     fps_last_instant: Instant,
     fps_frames: u32,
     fps_value: f32,
@@ -164,7 +164,7 @@ impl App {
         }
         let (fwd, rgt, up) = calculate_camera_basis(self.cam_yaw, self.cam_pitch);
         let fov_scale = (self.fov.to_radians() / 2.0).tan();
-        let buffer_u8 = {
+        let buffer_u32 = {
             let renderer = self.renderer.as_mut().context("Renderer not initialized")?;
             renderer.render(
                 self.cam_pos.to_array(),
@@ -177,6 +177,13 @@ impl App {
         if self.config.renderer.save_first_frame {
             let path = Path::new(&self.config.renderer.first_frame_path);
             if !path.exists() {
+                let mut buffer_u8 = Vec::with_capacity(buffer_u32.len() * 4);
+                for pixel in &buffer_u32 {
+                    let r = ((pixel >> 16) & 0xFF) as u8;
+                    let g = ((pixel >> 8) & 0xFF) as u8;
+                    let b = (pixel & 0xFF) as u8;
+                    buffer_u8.extend_from_slice(&[r, g, b, 255]);
+                }
                 image::save_buffer(
                     path,
                     &buffer_u8,
@@ -186,7 +193,7 @@ impl App {
                 )?;
             }
         }
-        self.last_frame = Some(buffer_u8);
+        self.last_frame = Some(buffer_u32);
         self.prev_cam_pos = self.cam_pos;
         self.prev_cam_yaw = self.cam_yaw;
         self.prev_cam_pitch = self.cam_pitch;
@@ -211,7 +218,7 @@ impl App {
     }
 
     fn present_frame(&mut self) -> Result<()> {
-        let buffer_u8 = self.last_frame.as_ref().context("Missing render buffer")?;
+        let buffer_u32 = self.last_frame.as_ref().context("Missing render buffer")?;
         let width = self.config.window.width;
         let height = self.config.window.height;
         let hud_layout = self.build_hud_layout(width, height)?;
@@ -219,13 +226,14 @@ impl App {
         let mut buffer = surface
             .buffer_mut()
             .map_err(|e| anyhow::anyhow!("Failed to access surface buffer: {e}"))?;
-        for (i, chunk) in buffer_u8.chunks_exact(4).enumerate() {
-            let pixel =
-                (u32::from(chunk[0]) << 16) | (u32::from(chunk[1]) << 8) | u32::from(chunk[2]);
-            if let Some(slot) = buffer.get_mut(i) {
-                *slot = pixel;
-            }
+        if buffer.len() != buffer_u32.len() {
+            return Err(anyhow!(
+                "Surface buffer size mismatch: surface={} frame={}",
+                buffer.len(),
+                buffer_u32.len()
+            ));
         }
+        buffer.copy_from_slice(buffer_u32);
         draw_hud(&mut buffer, &hud_layout);
         buffer
             .present()

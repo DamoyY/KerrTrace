@@ -30,7 +30,7 @@ unsafe impl DeviceRepr for KerrParams {}
 pub struct CudaRenderer {
     stream: Arc<CudaStream>,
     kernel: CudaFunction,
-    image_gpu: CudaSlice<u8>,
+    image_gpu: CudaSlice<u32>,
     lut_texture: CudaTextureLut,
     disk_texture: CudaTextureLut,
     lut_size: i32,
@@ -83,7 +83,7 @@ impl CudaRenderer {
         let module = context.load_module(ptx).context("加载 PTX 模块失败")?;
         let kernel = module.load_function("kernel").context("获取核函数失败")?;
         let image_gpu = stream
-            .alloc_zeros::<u8>((u_width * u_height * 4) as usize)
+            .alloc_zeros::<u32>((u_width * u_height) as usize)
             .context("allocate 图像缓存失败")?;
         let block_x = config.renderer.block_dim[0];
         let block_y = config.renderer.block_dim[1];
@@ -124,7 +124,7 @@ impl CudaRenderer {
         rgt: [f32; 3],
         up: [f32; 3],
         fov_scale: f32,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<Vec<u32>> {
         let launch_config = LaunchConfig {
             grid_dim: self.grid_dim,
             block_dim: self.block_dim,

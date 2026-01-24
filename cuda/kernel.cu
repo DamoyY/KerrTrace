@@ -38,7 +38,7 @@ __device__ __forceinline__ float rand01(unsigned long long state)
 extern "C"
 {
     __global__ __launch_bounds__(1024) void kernel(
-        uchar4 *__restrict__ image_out,
+        unsigned int *__restrict__ image_out,
         int width, int height,
         float cam_x, float cam_y, float cam_z,
         float fwd_x, float fwd_y, float fwd_z,
@@ -92,10 +92,9 @@ extern "C"
         accumulated_color.z *= final_scale;
         float3 final_color = aces_tone_map(accumulated_color);
         int idx = y * width + x;
-        image_out[idx] = make_uchar4(
-            float_to_byte(final_color.x),
-            float_to_byte(final_color.y),
-            float_to_byte(final_color.z),
-            255);
+        unsigned int r = (unsigned int)float_to_byte(final_color.x);
+        unsigned int g = (unsigned int)float_to_byte(final_color.y);
+        unsigned int b = (unsigned int)float_to_byte(final_color.z);
+        image_out[idx] = (r << 16) | (g << 8) | b;
     }
 }
