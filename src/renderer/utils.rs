@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 use log::error;
 
 use super::KerrParams;
-use crate::KernelConfig;
+use crate::{KernelConfig, math::f32_from_f64};
 fn calc_isco(a_norm: f32, prograde: bool, mass: f32) -> f32 {
     let aa = a_norm * a_norm;
     let z1 = (1.0 - aa)
@@ -164,7 +164,7 @@ pub(super) fn generate_disk_temperature_lut(
     for i in 0..size {
         let i_u32 = u32::try_from(i).map_err(|_| anyhow!("吸积盘温度表索引超出 u32 范围: {i}"))?;
         let ratio = f64::from(i_u32) / denom_f;
-        let r = f32_from_f64_checked(inner + ratio * span)?;
+        let r = f32_from_f64(inner + ratio * span)?;
         let f = calc_novikov_thorne_factor(r, params.a_norm, params.disk_inner, params.inv_m);
         if !f.is_finite() {
             return Err(anyhow!("吸积盘通量因子为非有限值: {f}"));
@@ -203,7 +203,7 @@ pub(super) fn generate_blackbody_lut(
                 u32::try_from(i).map_err(|_| anyhow!("黑体查找表索引超出 u32 范围: {i}"))?;
             let ratio = f64::from(i_u32) / denom_f;
             let temp = ratio * f64::from(max_temp);
-            f32_from_f64_checked(temp).map_err(|err| anyhow!("温度值转换失败: {err}"))
+            f32_from_f64(temp).map_err(|err| anyhow!("温度值转换失败: {err}"))
         })
         .collect::<Result<Vec<f32>>>()?;
     let mut lambdas = Vec::new();
@@ -290,22 +290,4 @@ fn xyz_to_rgb(x_val: f32, y_val: f32, z_val: f32) -> (f32, f32, f32) {
         (-0.204_025_9f32).mul_add(y_val, 1.057_225_2f32 * z_val),
     );
     (red, green, blue)
-}
-fn f32_from_f64_checked(value: f64) -> Result<f32> {
-    if !value.is_finite() {
-        return Err(anyhow!("数值不是有限值: {value}"));
-    }
-    let min = f64::from(f32::MIN);
-    let max = f64::from(f32::MAX);
-    if value < min || value > max {
-        return Err(anyhow!("数值超出 f32 范围: {value}"));
-    }
-    let parsed: f32 = value
-        .to_string()
-        .parse()
-        .map_err(|err| anyhow!("解析 f32 失败: {err}"))?;
-    if !parsed.is_finite() {
-        return Err(anyhow!("转换后数值不是有限值: {parsed}"));
-    }
-    Ok(parsed)
 }

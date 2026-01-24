@@ -37,7 +37,7 @@ __device__ __forceinline__ float rand01(unsigned long long state)
 #include "kerr.cuh"
 extern "C"
 {
-    __global__ void kernel(
+    __global__ __launch_bounds__(1024) void kernel(
         uchar4 *__restrict__ image_out,
         int width, int height,
         float cam_x, float cam_y, float cam_z,

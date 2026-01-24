@@ -9,7 +9,8 @@ use winit::{
     window::{WindowAttributes, WindowId},
 };
 
-use super::{App, f32_from_f64};
+use crate::math::f32_from_f64;
+use super::App;
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {

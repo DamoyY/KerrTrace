@@ -1,5 +1,6 @@
 mod app;
 mod hud;
+mod math;
 mod renderer;
 use std::{fmt, fs::File, path::Path};
 
