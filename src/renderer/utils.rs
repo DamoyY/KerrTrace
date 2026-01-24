@@ -4,7 +4,10 @@ use anyhow::{Result, anyhow};
 use log::error;
 
 use super::init::KerrParams;
-use crate::{Config, KernelConfig, math::f32_from_f64};
+use crate::{
+    Config, KernelConfig,
+    math::{ensure_finite_f32, f32_from_f64_with_context},
+};
 fn calc_isco(a_norm: f32, prograde: bool, mass: f32) -> f32 {
     let aa = a_norm * a_norm;
     let z1 = (1.0 - aa)
@@ -144,12 +147,6 @@ pub(super) fn build_cuda_defines(config: &KernelConfig, wavelength_step: f32) ->
     output.push('\n');
     output
 }
-fn ensure_finite_f32(value: f32, label: &str) -> Result<f32> {
-    if !value.is_finite() {
-        return Err(anyhow!("{label}不是有限值: {value}"));
-    }
-    Ok(value)
-}
 fn lut_denom_u32(size: usize, label: &str) -> Result<u32> {
     let denom_usize = size - 1;
     u32::try_from(denom_usize).map_err(|_| anyhow!("{label}尺寸超出 u32 范围: {size}"))
@@ -157,9 +154,6 @@ fn lut_denom_u32(size: usize, label: &str) -> Result<u32> {
 fn ratio_from_index(i: usize, denom: u32, label: &str) -> Result<f64> {
     let i_u32 = u32::try_from(i).map_err(|_| anyhow!("{label}索引超出 u32 范围: {i}"))?;
     Ok(f64::from(i_u32) / f64::from(denom))
-}
-fn f32_from_f64_with_context(value: f64, label: &str) -> Result<f32> {
-    f32_from_f64(value).map_err(|err| anyhow!("{label}转换失败: {err}"))
 }
 pub(super) fn generate_disk_temperature_lut(
     params: &KerrParams,

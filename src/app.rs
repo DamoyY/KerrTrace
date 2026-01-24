@@ -9,7 +9,7 @@ use winit::{keyboard::KeyCode, window::Window};
 use crate::{
     Config,
     hud::{self, HudLayout, TextStyle, draw_hud},
-    math::calculate_camera_basis,
+    math::{calculate_camera_basis, ensure_finite_f32, ensure_finite_vec3},
     renderer::CudaRenderer,
 };
 pub struct App {
@@ -115,20 +115,16 @@ impl App {
     }
 
     fn clamp_camera_to_escape_radius(&mut self) -> Result<()> {
-        if !self.cam_pos.is_finite() {
-            return Err(anyhow!("摄像机位置不是有限值"));
-        }
-        let escape_radius = self.config.kernel.integrator.escape_radius;
-        if !escape_radius.is_finite() || escape_radius <= 0.0 {
+        let cam_pos = ensure_finite_vec3(self.cam_pos, "摄像机位置")?;
+        let escape_radius =
+            ensure_finite_f32(self.config.kernel.integrator.escape_radius, "escape_radius")?;
+        if escape_radius <= 0.0 {
             return Err(anyhow!("escape_radius 无效: {escape_radius}"));
         }
-        let dist = self.cam_pos.length();
-        if !dist.is_finite() {
-            return Err(anyhow!("摄像机距离不是有限值: {dist}"));
-        }
+        let dist = ensure_finite_f32(cam_pos.length(), "摄像机距离")?;
         if dist > escape_radius {
             let scale = escape_radius / dist;
-            self.cam_pos *= scale;
+            self.cam_pos = cam_pos * scale;
         }
         Ok(())
     }

@@ -63,6 +63,37 @@ __device__ __forceinline__ float gaussian_weight(int x, float sigma)
     float denom = 2.0f * sigma * sigma;
     return __expf(-(t * t) / denom);
 }
+__device__ __forceinline__ float3 gaussian_blur_axis(
+    const float4 *__restrict__ buffer,
+    int width, int height,
+    int x, int y,
+    int radius,
+    float sigma,
+    int step_x, int step_y)
+{
+    float3 accum = make_float3(0.0f, 0.0f, 0.0f);
+    float weight_sum = 0.0f;
+    for (int i = -radius; i <= radius; i++)
+    {
+        int sx = x + i * step_x;
+        int sy = y + i * step_y;
+        if (sx < 0 || sx >= width || sy < 0 || sy >= height)
+            continue;
+        float w = gaussian_weight(i, sigma);
+        float4 c = buffer[sy * width + sx];
+        accum.x += c.x * w;
+        accum.y += c.y * w;
+        accum.z += c.z * w;
+        weight_sum += w;
+    }
+    if (weight_sum > 0.0f)
+    {
+        accum.x /= weight_sum;
+        accum.y /= weight_sum;
+        accum.z /= weight_sum;
+    }
+    return accum;
+}
 #include "kerr.cuh"
 extern "C"
 {
@@ -142,26 +173,16 @@ extern "C"
             bloom_buffer[idx] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
             return;
         }
-        float3 accum = make_float3(0.0f, 0.0f, 0.0f);
-        float weight_sum = 0.0f;
-        for (int dx = -radius; dx <= radius; dx++)
-        {
-            int sx = x + dx;
-            if (sx < 0 || sx >= width)
-                continue;
-            float w = gaussian_weight(dx, sigma);
-            float4 c = accumulation_buffer[y * width + sx];
-            accum.x += c.x * w;
-            accum.y += c.y * w;
-            accum.z += c.z * w;
-            weight_sum += w;
-        }
-        if (weight_sum > 0.0f)
-        {
-            accum.x /= weight_sum;
-            accum.y /= weight_sum;
-            accum.z /= weight_sum;
-        }
+        float3 accum = gaussian_blur_axis(
+            accumulation_buffer,
+            width,
+            height,
+            x,
+            y,
+            radius,
+            sigma,
+            1,
+            0);
         bloom_buffer[idx] = make_float4(accum.x, accum.y, accum.z, 0.0f);
     }
 
@@ -184,26 +205,16 @@ extern "C"
         float3 final_color = make_float3(base.x, base.y, base.z);
         if (bloom_enabled && radius > 0 && intensity > 0.0f)
         {
-            float3 accum = make_float3(0.0f, 0.0f, 0.0f);
-            float weight_sum = 0.0f;
-            for (int dy = -radius; dy <= radius; dy++)
-            {
-                int sy = y + dy;
-                if (sy < 0 || sy >= height)
-                    continue;
-                float w = gaussian_weight(dy, sigma);
-                float4 c = bloom_buffer[sy * width + x];
-                accum.x += c.x * w;
-                accum.y += c.y * w;
-                accum.z += c.z * w;
-                weight_sum += w;
-            }
-            if (weight_sum > 0.0f)
-            {
-                accum.x /= weight_sum;
-                accum.y /= weight_sum;
-                accum.z /= weight_sum;
-            }
+            float3 accum = gaussian_blur_axis(
+                bloom_buffer,
+                width,
+                height,
+                x,
+                y,
+                radius,
+                sigma,
+                0,
+                1);
             final_color.x += accum.x * intensity;
             final_color.y += accum.y * intensity;
             final_color.z += accum.z * intensity;

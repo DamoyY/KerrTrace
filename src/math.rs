@@ -30,3 +30,18 @@ pub fn f32_from_f64(value: f64) -> Result<f32> {
     }
     Ok(parsed)
 }
+pub fn f32_from_f64_with_context(value: f64, label: &str) -> Result<f32> {
+    f32_from_f64(value).map_err(|err| anyhow!("{label}转换失败: {err}"))
+}
+pub fn ensure_finite_f32(value: f32, label: &str) -> Result<f32> {
+    if !value.is_finite() {
+        return Err(anyhow!("{label}不是有限值: {value}"));
+    }
+    Ok(value)
+}
+pub fn ensure_finite_vec3(value: Vec3, label: &str) -> Result<Vec3> {
+    if !value.is_finite() {
+        return Err(anyhow!("{label}不是有限值: {value:?}"));
+    }
+    Ok(value)
+}
