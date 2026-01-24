@@ -1,6 +1,7 @@
 mod init;
 mod texture;
 mod utils;
+mod blackbody;
 use std::{collections::VecDeque, path::Path, sync::Arc};
 
 use anyhow::{Context, Result, anyhow};

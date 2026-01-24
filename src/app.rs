@@ -29,6 +29,7 @@ pub struct App {
     keys_pressed: HashSet<KeyCode>,
     mouse_locked: bool,
     last_present: Instant,
+    last_camera_update: Instant,
     has_frame: bool,
     save_first_frame_pending: bool,
     fps_last_instant: Instant,
@@ -60,6 +61,7 @@ impl App {
             keys_pressed: HashSet::new(),
             mouse_locked: false,
             last_present: now,
+            last_camera_update: now,
             has_frame: false,
             save_first_frame_pending,
             fps_last_instant: now,
@@ -91,7 +93,11 @@ impl App {
 
     fn update_camera(&mut self) -> Result<()> {
         let (fwd, rgt, _up) = calculate_camera_basis(self.cam_yaw, self.cam_pitch);
-        let mut speed = self.config.controls.move_speed;
+        let elapsed = self.last_camera_update.elapsed();
+        self.last_camera_update = Instant::now();
+        let elapsed_secs = elapsed.as_secs_f64();
+        let elapsed_secs = crate::math::f32_from_f64(elapsed_secs)?;
+        let mut speed = self.config.controls.move_speed * elapsed_secs;
         if self.keys_pressed.contains(&KeyCode::ShiftLeft) {
             speed *= self.config.controls.sprint_multiplier;
         }
@@ -140,11 +146,9 @@ impl App {
             return Ok(());
         }
         let rendered = self.update_render_if_needed()?;
-        let presented = self.present_frame()?;
+        self.present_frame()?;
         self.update_fps(rendered);
-        if presented {
-            self.throttle_if_needed();
-        }
+        self.throttle_if_needed();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }

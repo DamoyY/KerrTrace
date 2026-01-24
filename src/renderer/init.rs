@@ -7,8 +7,9 @@ use cudarc::{
 };
 
 use super::{
+    blackbody::generate_blackbody_lut,
     texture::{CudaTextureLut, create_disk_texture, create_lut_texture},
-    utils::{build_cuda_defines, generate_blackbody_lut, generate_disk_temperature_lut},
+    utils::{build_cuda_defines, generate_disk_temperature_lut},
 };
 use crate::Config;
 #[repr(C)]
