@@ -45,7 +45,10 @@ __device__ float3 trace_ray(
     float3 color = make_float3(0.0f, 0.0f, 0.0f);
     float transmittance = 1.0f;
     float h = CONFIG_INTEGRATOR_INITIAL_STEP;
-    const float tol = CONFIG_INTEGRATOR_TOLERANCE;
+    const float base_tol = CONFIG_INTEGRATOR_TOLERANCE;
+    const float tol_max_scale = 5.0f;
+    const float tol_potential_near = 0.3f;
+    const float tol_potential_far = 0.05f;
     static const float a21 = 1.0f / 5.0f;
     static const float a31 = 3.0f / 40.0f, a32 = 9.0f / 40.0f;
     static const float a41 = 44.0f / 45.0f, a42 = -56.0f / 15.0f, a43 = 32.0f / 9.0f;
@@ -59,6 +62,12 @@ __device__ float3 trace_ray(
         RayDerivs k1, k2, k3, k4, k5, k6, k7;
         RayState next_s;
         float error;
+        float r_curr = ks_r_from_xyz(s.x, s.y, s.z, p.aa);
+        float r2_curr = r_curr * r_curr;
+        float denomH = fmaf(r2_curr, r2_curr, p.aa * s.y * s.y);
+        float H = p.M * r_curr * r2_curr * __fdividef(1.0f, denomH);
+        float t = __fdividef(H - tol_potential_far, tol_potential_near - tol_potential_far);
+        float tol = base_tol * (tol_max_scale - tol_max_scale * t);
         int attempts = 0;
         bool accepted = false;
         float h_used = h;
