@@ -29,7 +29,6 @@ __device__ __forceinline__ float3 aces_tone_map(float3 x)
 }
 __device__ __forceinline__ float srgb_oetf(float x)
 {
-    x = fmaxf(x, 0.0f);
     if (x <= 0.0031308f)
         return 12.92f * x;
     return 1.055f * powf(x, 0.4166666666666667f) - 0.055f;
@@ -45,17 +44,6 @@ __device__ __forceinline__ float3 srgb_oetf(float3 x)
 __device__ unsigned char float_to_byte(float val)
 {
     return (unsigned char)__float2int_rn(__saturatef(val) * 255.0f);
-}
-__device__ __forceinline__ unsigned int pcg32(unsigned long long state)
-{
-    unsigned long long x = state * 6364136223846793005ULL + 1442695040888963407ULL;
-    unsigned int xorshifted = (unsigned int)(((x >> 18u) ^ x) >> 27u);
-    unsigned int rot = (unsigned int)(x >> 59u);
-    return (xorshifted >> rot) | (xorshifted << ((32u - rot) & 31));
-}
-__device__ __forceinline__ float rand01(unsigned long long state)
-{
-    return (float)pcg32(state) * (1.0f / 4294967296.0f);
 }
 __device__ __forceinline__ float gaussian_weight(int x, float sigma)
 {
@@ -94,7 +82,7 @@ __device__ __forceinline__ float3 gaussian_blur_axis(
     }
     return accum;
 }
-#include "kerr.cuh"
+#include "kerr_trace.cuh"
 extern "C"
 {
     __global__ __launch_bounds__(1024) void trace_kernel(
