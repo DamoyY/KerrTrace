@@ -31,7 +31,7 @@ __device__ __forceinline__ unsigned int pcg32(unsigned long long state)
 }
 __device__ __forceinline__ float rand01(unsigned long long state)
 {
-    return (float)pcg32(state) * (1.0f / 4294967296.0f);
+    return (float)pcg32(state) * 2.3283064365386963e-10f;
 }
 __device__ __forceinline__ float fast_cbrtf(float x)
 {
@@ -50,7 +50,9 @@ __device__ __forceinline__ float ks_r_from_xyz(float x, float y, float z, float 
 {
     float rho2 = fmaf(x, x, fmaf(y, y, z * z));
     float u = rho2 - a2;
-    float s = __fsqrt_rn(fmaf(u, u, 4.0f * a2 * y * y));
+    float s_sq = fmaf(u, u, 4.0f * a2 * y * y);
+    float inv_s = rsqrtf(s_sq);
+    float s = s_sq * inv_s;
     float r2 = 0.5f * (u + s);
     return __fsqrt_rn(r2);
 }
@@ -59,14 +61,19 @@ __device__ __forceinline__ void ks_bl_from_xyz(float x, float y, float z, const 
     float a2 = p.aa;
     float rho2 = fmaf(x, x, fmaf(y, y, z * z));
     float u = rho2 - a2;
-    float s = __fsqrt_rn(fmaf(u, u, 4.0f * a2 * y * y));
+    float s_sq = fmaf(u, u, 4.0f * a2 * y * y);
+    float inv_s = rsqrtf(s_sq);
+    float s = s_sq * inv_s;
     float r2 = 0.5f * (u + s);
-    r = __fsqrt_rn(r2);
-    cos_th = __fdividef(y, r);
+    float inv_r = rsqrtf(r2);
+    r = r2 * inv_r;
+    cos_th = y * inv_r;
     float cos2 = cos_th * cos_th;
-    sin_th = __fsqrt_rn(1.0f - cos2);
+    float sin_sq = 1.0f - cos2;
+    float inv_sin = rsqrtf(sin_sq);
+    sin_th = sin_sq * inv_sin;
     float denom = r2 + a2;
-    float inv = __fdividef(1.0f, denom * sin_th);
+    float inv = inv_sin * __fdividef(1.0f, denom);
     float cos_phi = (r * z + p.a * x) * inv;
     float sin_phi = (r * x - p.a * z) * inv;
     phi = atan2f(sin_phi, cos_phi);
@@ -80,11 +87,11 @@ __device__ __forceinline__ RayDerivs get_derivs(const RayState &s, float pt)
     float a2 = p.aa;
     float rho2 = fmaf(x, x, fmaf(y, y, z * z));
     float u = rho2 - a2;
-    float s_term = __fsqrt_rn(fmaf(u, u, 4.0f * a2 * y * y));
-    float r2 = 0.5f * (u + s_term);
-    float r = __fsqrt_rn(r2);
-    float inv_r = __fdividef(1.0f, r);
-    float inv_s = __fdividef(1.0f, s_term);
+    float s_sq = fmaf(u, u, 4.0f * a2 * y * y);
+    float inv_s = rsqrtf(s_sq);
+    float r2 = 0.5f * (u + s_sq * inv_s);
+    float inv_r = rsqrtf(r2);
+    float r = r2 * inv_r;
     float dr2_dx = x * (1.0f + u * inv_s);
     float dr2_dy = y * (1.0f + (u + 4.0f * a2) * (0.5f * inv_s));
     float dr2_dz = z * (1.0f + u * inv_s);
@@ -104,9 +111,10 @@ __device__ __forceinline__ RayDerivs get_derivs(const RayState &s, float pt)
     float H = p.M * r3 * inv_denomH;
     float lp = fmaf(lx, s.px, fmaf(ly, s.py, fmaf(lz, s.pz, -pt)));
     RayDerivs d;
-    d.dx = s.px - 2.0f * H * lx * lp;
-    d.dy = s.py - 2.0f * H * ly * lp;
-    d.dz = s.pz - 2.0f * H * lz * lp;
+    float common_H_lp = 2.0f * H * lp;
+    d.dx = s.px - common_H_lp * lx;
+    d.dy = s.py - common_H_lp * ly;
+    d.dz = s.pz - common_H_lp * lz;
     float dD_dx = 2.0f * r * drdx;
     float dD_dy = 2.0f * r * drdy;
     float dD_dz = 2.0f * r * drdz;
@@ -124,7 +132,7 @@ __device__ __forceinline__ RayDerivs get_derivs(const RayState &s, float pt)
     float dlz_dx = (dNz_dx * denom - Nz * dD_dx) * inv_denom2;
     float dlz_dy = (dNz_dy * denom - Nz * dD_dy) * inv_denom2;
     float dlz_dz = (dNz_dz * denom - Nz * dD_dz) * inv_denom2;
-    float inv_r2 = __fdividef(1.0f, r2);
+    float inv_r2 = inv_r * inv_r;
     float dly_dx = -y * drdx * inv_r2;
     float dly_dy = (r - y * drdy) * inv_r2;
     float dly_dz = -y * drdz * inv_r2;
@@ -132,16 +140,17 @@ __device__ __forceinline__ RayDerivs get_derivs(const RayState &s, float pt)
     float dDenH_dy = fmaf(4.0f * r3, drdy, 2.0f * a2 * y);
     float dDenH_dz = 4.0f * r3 * drdz;
     float inv_denomH2 = inv_denomH * inv_denomH;
-    float dH_dx = p.M * (3.0f * r2 * drdx * denomH - r3 * dDenH_dx) * inv_denomH2;
-    float dH_dy = p.M * (3.0f * r2 * drdy * denomH - r3 * dDenH_dy) * inv_denomH2;
-    float dH_dz = p.M * (3.0f * r2 * drdz * denomH - r3 * dDenH_dz) * inv_denomH2;
+    float factor_H = p.M * inv_denomH2;
+    float dH_dx = factor_H * (3.0f * r2 * drdx * denomH - r3 * dDenH_dx);
+    float dH_dy = factor_H * (3.0f * r2 * drdy * denomH - r3 * dDenH_dy);
+    float dH_dz = factor_H * (3.0f * r2 * drdz * denomH - r3 * dDenH_dz);
     float dlp_dx = dlx_dx * s.px + dly_dx * s.py + dlz_dx * s.pz;
     float dlp_dy = dlx_dy * s.px + dly_dy * s.py + dlz_dy * s.pz;
     float dlp_dz = dlx_dz * s.px + dly_dz * s.py + dlz_dz * s.pz;
     float lp2 = lp * lp;
-    d.dpx = dH_dx * lp2 + 2.0f * H * lp * dlp_dx;
-    d.dpy = dH_dy * lp2 + 2.0f * H * lp * dlp_dy;
-    d.dpz = dH_dz * lp2 + 2.0f * H * lp * dlp_dz;
+    d.dpx = dH_dx * lp2 + common_H_lp * dlp_dx;
+    d.dpy = dH_dy * lp2 + common_H_lp * dlp_dy;
+    d.dpz = dH_dz * lp2 + common_H_lp * dlp_dz;
     return d;
 }
 __device__ __forceinline__ float3 get_sky_color(float3 dir, float transmittance)
@@ -176,7 +185,7 @@ __device__ __forceinline__ float lerp_hermite(float y0, float m0, float y1, floa
 __device__ __forceinline__ float2 gradient_from_hash(unsigned int h)
 {
     const float TWO_PI = 6.283185307f;
-    float angle = (float)h * (TWO_PI / 4294967296.0f);
+    float angle = (float)h * (TWO_PI * 2.3283064365386963e-10f);
     float s, c;
     __sincosf(angle, &s, &c);
     return make_float2(c, s);
