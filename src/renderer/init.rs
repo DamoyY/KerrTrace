@@ -37,6 +37,7 @@ pub(super) struct RendererBuffers {
     pub(super) image_gpu: CudaSlice<u32>,
     pub(super) host_image: PinnedHostSlice<u32>,
     pub(super) lut_error_flag: CudaSlice<u32>,
+    pub(super) lut_error_host: PinnedHostSlice<u32>,
 }
 pub(super) fn validate_bloom_settings(config: &Config) -> Result<(bool, f32, f32, i32)> {
     let bloom_enabled = config.bloom.enabled;
@@ -163,12 +164,15 @@ pub(super) fn allocate_buffers(
     let lut_error_flag = stream
         .alloc_zeros::<u32>(2)
         .context("allocate LUT 错误标记失败")?;
+    let lut_error_host =
+        unsafe { context.alloc_pinned::<u32>(2) }.context("allocate LUT 错误标记主机缓冲区失败")?;
     Ok(RendererBuffers {
         hdr_buffer,
         bloom_buffer,
         image_gpu,
         host_image,
         lut_error_flag,
+        lut_error_host,
     })
 }
 pub(super) const fn compute_launch_dims(

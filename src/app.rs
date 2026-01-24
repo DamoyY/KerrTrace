@@ -30,6 +30,7 @@ pub struct App {
     mouse_locked: bool,
     last_present: Instant,
     has_frame: bool,
+    save_first_frame_pending: bool,
     fps_last_instant: Instant,
     fps_frames: u32,
     fps_value: f32,
@@ -41,6 +42,7 @@ impl App {
     pub(crate) fn new(config: Config) -> Self {
         let cam_pos = Vec3::from_array(config.camera.position);
         let now = Instant::now();
+        let save_first_frame_pending = config.renderer.save_first_frame;
         Self {
             cam_pos,
             cam_yaw: config.camera.yaw,
@@ -59,6 +61,7 @@ impl App {
             mouse_locked: false,
             last_present: now,
             has_frame: false,
+            save_first_frame_pending,
             fps_last_instant: now,
             fps_frames: 0,
             fps_value: 0.0,
@@ -137,9 +140,11 @@ impl App {
             return Ok(());
         }
         let rendered = self.update_render_if_needed()?;
+        let presented = self.present_frame()?;
         self.update_fps(rendered);
-        self.present_frame()?;
-        self.throttle_if_needed();
+        if presented {
+            self.throttle_if_needed();
+        }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -152,39 +157,24 @@ impl App {
         }
         let (fwd, rgt, up) = calculate_camera_basis(self.cam_yaw, self.cam_pitch);
         let fov_scale = (self.fov.to_radians() / 2.0).tan();
-        let save_first_frame = self.config.renderer.save_first_frame;
-        let first_frame_path = self.config.renderer.first_frame_path.clone();
-        let width = self.config.window.width;
-        let height = self.config.window.height;
-        {
+        let submitted = {
             let renderer = self.renderer.as_mut().context("Renderer not initialized")?;
-            let buffer_u32 = renderer.render(
+            renderer.submit_render(
                 self.cam_pos.to_array(),
                 fwd.to_array(),
                 rgt.to_array(),
                 up.to_array(),
                 fov_scale,
-            )?;
-            if save_first_frame {
-                let path = Path::new(&first_frame_path);
-                if !path.exists() {
-                    let mut buffer_u8 = Vec::with_capacity(buffer_u32.len() * 4);
-                    for &pixel in buffer_u32 {
-                        let r = ((pixel >> 16) & 0xFF) as u8;
-                        let g = ((pixel >> 8) & 0xFF) as u8;
-                        let b = (pixel & 0xFF) as u8;
-                        buffer_u8.extend_from_slice(&[r, g, b, 255]);
-                    }
-                    image::save_buffer(path, &buffer_u8, width, height, image::ColorType::Rgba8)?;
-                }
-            }
+            )?
+        };
+        if submitted {
+            self.has_frame = true;
+            self.prev_cam_pos = self.cam_pos;
+            self.prev_cam_yaw = self.cam_yaw;
+            self.prev_cam_pitch = self.cam_pitch;
+            self.prev_fov = self.fov;
         }
-        self.has_frame = true;
-        self.prev_cam_pos = self.cam_pos;
-        self.prev_cam_yaw = self.cam_yaw;
-        self.prev_cam_pitch = self.cam_pitch;
-        self.prev_fov = self.fov;
-        Ok(true)
+        Ok(submitted)
     }
 
     fn should_render(&self) -> bool {
@@ -203,32 +193,67 @@ impl App {
         (self.fov - self.prev_fov).abs() > Self::FOV_EPSILON
     }
 
-    fn present_frame(&mut self) -> Result<()> {
+    fn present_frame(&mut self) -> Result<bool> {
         if !self.has_frame {
-            return Err(anyhow!("Missing render buffer"));
+            return Ok(false);
         }
-        let renderer = self.renderer.as_ref().context("Renderer not initialized")?;
-        let buffer_u32 = renderer.host_image()?;
         let width = self.config.window.width;
         let height = self.config.window.height;
         let hud_layout = self.build_hud_layout(width, height)?;
-        let surface = self.surface.as_mut().context("Surface not initialized")?;
-        let mut buffer = surface
-            .buffer_mut()
-            .map_err(|e| anyhow::anyhow!("Failed to access surface buffer: {e}"))?;
-        if buffer.len() != buffer_u32.len() {
-            return Err(anyhow!(
-                "Surface buffer size mismatch: surface={} frame={}",
-                buffer.len(),
-                buffer_u32.len()
-            ));
+        let pending_first_frame = self.save_first_frame_pending;
+        let first_frame_path = self.config.renderer.first_frame_path.clone();
+        let mut clear_first_frame_flag = false;
+        {
+            let renderer = self.renderer.as_mut().context("Renderer not initialized")?;
+            let surface = self.surface.as_mut().context("Surface not initialized")?;
+            let frame_index;
+            {
+                let Some(ready_frame) = renderer.ready_frame()? else {
+                    return Ok(false);
+                };
+                frame_index = ready_frame.index;
+                if pending_first_frame {
+                    let path = Path::new(&first_frame_path);
+                    if !path.exists() {
+                        let mut buffer_u8 = Vec::with_capacity(ready_frame.data.len() * 4);
+                        for &pixel in ready_frame.data {
+                            let r = ((pixel >> 16) & 0xFF) as u8;
+                            let g = ((pixel >> 8) & 0xFF) as u8;
+                            let b = (pixel & 0xFF) as u8;
+                            buffer_u8.extend_from_slice(&[r, g, b, 255]);
+                        }
+                        image::save_buffer(
+                            path,
+                            &buffer_u8,
+                            width,
+                            height,
+                            image::ColorType::Rgba8,
+                        )?;
+                    }
+                    clear_first_frame_flag = true;
+                }
+                let mut buffer = surface
+                    .buffer_mut()
+                    .map_err(|e| anyhow::anyhow!("Failed to access surface buffer: {e}"))?;
+                if buffer.len() != ready_frame.data.len() {
+                    return Err(anyhow!(
+                        "Surface buffer size mismatch: surface={} frame={}",
+                        buffer.len(),
+                        ready_frame.data.len()
+                    ));
+                }
+                buffer.copy_from_slice(ready_frame.data);
+                draw_hud(&mut buffer, &hud_layout);
+                buffer
+                    .present()
+                    .map_err(|e| anyhow::anyhow!("Failed to present frame: {e}"))?;
+            }
+            renderer.finish_frame(frame_index)?;
         }
-        buffer.copy_from_slice(buffer_u32);
-        draw_hud(&mut buffer, &hud_layout);
-        buffer
-            .present()
-            .map_err(|e| anyhow::anyhow!("Failed to present frame: {e}"))?;
-        Ok(())
+        if clear_first_frame_flag {
+            self.save_first_frame_pending = false;
+        }
+        Ok(true)
     }
 
     fn build_hud_layout(&self, width: u32, height: u32) -> Result<HudLayout> {
