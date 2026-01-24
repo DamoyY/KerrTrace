@@ -59,3 +59,9 @@ kernel:
     transmittance_cutoff: 1e-2
     horizon_epsilon: 5e-7
     escape_radius: 80.0
+disk_noise:
+  enabled: true
+  scale: 0.1
+  strength: 0.6
+  winding: 50.0
+  detail: 10

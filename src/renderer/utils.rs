@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 use log::error;
 
 use super::init::KerrParams;
-use crate::{KernelConfig, math::f32_from_f64};
+use crate::{Config, KernelConfig, math::f32_from_f64};
 fn calc_isco(a_norm: f32, prograde: bool, mass: f32) -> f32 {
     let aa = a_norm * a_norm;
     let z1 = (1.0 - aa)
@@ -47,9 +47,9 @@ fn calc_novikov_thorne_factor(r: f32, a_norm: f32, r_isco: f32, inv_m: f32) -> f
     let geometric_denom = r_norm * (2.0f32).mul_add(a_norm, r_norm.mul_add(x, -(3.0 * x)));
     (q / geometric_denom).max(0.0)
 }
-pub(super) fn build_kerr_params(config: &KernelConfig) -> Result<KerrParams> {
-    let spin = config.black_hole.spin;
-    let mass = config.black_hole.mass;
+pub(super) fn build_kerr_params(config: &Config) -> Result<KerrParams> {
+    let spin = config.kernel.black_hole.spin;
+    let mass = config.kernel.black_hole.mass;
     if !spin.is_finite() {
         return Err(anyhow!("黑洞自旋不是有限值: {spin}"));
     }
@@ -67,6 +67,19 @@ pub(super) fn build_kerr_params(config: &KernelConfig) -> Result<KerrParams> {
     if !rh.is_finite() || !disk_inner.is_finite() {
         return Err(anyhow!("Kerr 参数计算产生了非有限值"));
     }
+    let noise = &config.disk_noise;
+    if !noise.scale.is_finite() {
+        return Err(anyhow!("吸积盘噪声缩放不是有限值: {}", noise.scale));
+    }
+    if !noise.strength.is_finite() {
+        return Err(anyhow!("吸积盘噪声强度不是有限值: {}", noise.strength));
+    }
+    if !noise.winding.is_finite() {
+        return Err(anyhow!("吸积盘噪声缠绕系数不是有限值: {}", noise.winding));
+    }
+    let detail = i32::try_from(noise.detail)
+        .map_err(|_| anyhow!("吸积盘噪声层数超出 i32 范围: {}", noise.detail))?;
+    let noise_enabled = i32::from(noise.enabled);
     Ok(KerrParams {
         a: spin,
         m: mass,
@@ -75,6 +88,11 @@ pub(super) fn build_kerr_params(config: &KernelConfig) -> Result<KerrParams> {
         a_norm,
         rh,
         disk_inner,
+        disk_noise_scale: noise.scale,
+        disk_noise_strength: noise.strength,
+        disk_noise_winding: noise.winding,
+        disk_noise_enabled: noise_enabled,
+        disk_noise_detail: detail,
     })
 }
 fn push_define(lines: &mut Vec<String>, key: &str, value: impl Display) {

@@ -21,6 +21,11 @@ pub(super) struct KerrParams {
     pub(super) a_norm: f32,
     pub(super) rh: f32,
     pub(super) disk_inner: f32,
+    pub(super) disk_noise_scale: f32,
+    pub(super) disk_noise_strength: f32,
+    pub(super) disk_noise_winding: f32,
+    pub(super) disk_noise_enabled: i32,
+    pub(super) disk_noise_detail: i32,
 }
 unsafe impl DeviceRepr for KerrParams {}
 pub(super) struct RendererBuffers {

@@ -46,7 +46,7 @@ impl CudaRenderer {
         let u_height = config.window.height;
         let context = CudaContext::new(0).context("初始化 CUDA 上下文失败")?;
         let stream = context.default_stream();
-        let kerr_params = build_kerr_params(&config.kernel)?;
+        let kerr_params = build_kerr_params(config)?;
         let (bloom_enabled, bloom_intensity, bloom_radius, bloom_radius_int) =
             validate_bloom_settings(config)?;
         let (lut_texture, disk_texture, lut_size, lut_max_temp) =

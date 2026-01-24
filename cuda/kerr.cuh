@@ -3,6 +3,8 @@
 struct KerrParams
 {
     float a, M, aa, inv_M, A_norm, rh, disk_inner;
+    float disk_noise_scale, disk_noise_strength, disk_noise_winding;
+    int disk_noise_enabled, disk_noise_detail;
 };
 __constant__ KerrParams c_params;
 struct RayState
@@ -68,6 +70,76 @@ __device__ __forceinline__ float3 get_sky_color(float3 dir, float transmittance)
     float intensity = is_grid ? CONFIG_SKY_INTENSITY * transmittance : 0.0f;
     return make_float3(intensity, intensity, intensity);
 }
+__device__ __forceinline__ float fade(float t)
+{
+    return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+}
+__device__ __forceinline__ float lerp(float a, float b, float t)
+{
+    return fmaf(t, b - a, a);
+}
+__device__ __forceinline__ float2 gradient_from_hash(unsigned int h)
+{
+    const float TWO_PI = 6.283185307f;
+    float angle = (float)h * (TWO_PI / 4294967296.0f);
+    float s, c;
+    __sincosf(angle, &s, &c);
+    return make_float2(c, s);
+}
+__device__ __forceinline__ float2 gradient(int ix, int iy)
+{
+    unsigned int ux = (unsigned int)ix;
+    unsigned int uy = (unsigned int)iy;
+    unsigned long long state = ((unsigned long long)ux << 32) | (unsigned long long)uy;
+    return gradient_from_hash(pcg32(state));
+}
+__device__ __forceinline__ float gradient_noise(float u, float v)
+{
+    int ix0 = __float2int_rd(u);
+    int iy0 = __float2int_rd(v);
+    int ix1 = ix0 + 1;
+    int iy1 = iy0 + 1;
+    float fx = u - (float)ix0;
+    float fy = v - (float)iy0;
+    float2 g00 = gradient(ix0, iy0);
+    float2 g10 = gradient(ix1, iy0);
+    float2 g01 = gradient(ix0, iy1);
+    float2 g11 = gradient(ix1, iy1);
+    float2 d00 = make_float2(fx, fy);
+    float2 d10 = make_float2(fx - 1.0f, fy);
+    float2 d01 = make_float2(fx, fy - 1.0f);
+    float2 d11 = make_float2(fx - 1.0f, fy - 1.0f);
+    float n00 = g00.x * d00.x + g00.y * d00.y;
+    float n10 = g10.x * d10.x + g10.y * d10.y;
+    float n01 = g01.x * d01.x + g01.y * d01.y;
+    float n11 = g11.x * d11.x + g11.y * d11.y;
+    float u_f = fade(fx);
+    float v_f = fade(fy);
+    float x1 = lerp(n00, n10, u_f);
+    float x2 = lerp(n01, n11, u_f);
+    return lerp(x1, x2, v_f);
+}
+__device__ __forceinline__ float fbm(float u, float v, int octaves)
+{
+    if (octaves <= 0)
+    {
+        return 0.5f;
+    }
+    float sum = 0.0f;
+    float amp = 1.0f;
+    float freq = 1.0f;
+    float amp_sum = 0.0f;
+    for (int i = 0; i < octaves; i++)
+    {
+        sum += gradient_noise(u * freq, v * freq) * amp;
+        amp_sum += amp;
+        amp *= 0.5f;
+        freq *= 2.0f;
+    }
+    float val = amp_sum > 0.0f ? (sum / amp_sum) : 0.0f;
+    val = val * 0.5f + 0.5f;
+    return fminf(fmaxf(val, 0.0f), 1.0f);
+}
 __device__ float3 trace_ray(
     float3 cam_pos,
     float3 ray_dir,
@@ -130,6 +202,7 @@ __device__ float3 trace_ray(
     static const float dc1 = 37.0f / 378.0f - 2825.0f / 27648.0f, dc3 = 250.0f / 621.0f - 18575.0f / 48384.0f, dc4 = 125.0f / 594.0f - 13525.0f / 55296.0f, dc5 = -277.0f / 14336.0f, dc6 = 512.0f / 1771.0f - 0.25f;
     for (int i = 0; i < CONFIG_INTEGRATOR_MAX_STEPS && transmittance > CONFIG_TRANSMITTANCE_CUTOFF; i++)
     {
+        float prev_phi = s.phi;
         RayDerivs k1, k2, k3, k4, k5, k6;
         RayState next_s;
         float error;
@@ -171,6 +244,7 @@ __device__ float3 trace_ray(
             float r_hit = (2 * t3 - 3 * t2 + 1) * prev_r + (t3 - 2 * t2 + t) * (k1.dr * h) + (-2 * t3 + 3 * t2) * s.r + (t3 - t2) * (ke.dr * h);
             if (r_hit >= disk_inner && r_hit <= disk_outer)
             {
+                float phi_hit = (2 * t3 - 3 * t2 + 1) * prev_phi + (t3 - 2 * t2 + t) * (k1.dph * h) + (-2 * t3 + 3 * t2) * s.phi + (t3 - t2) * (ke.dph * h);
                 float sqrt_M = __fsqrt_rn(p.M), r_sqrt = __fsqrt_rn(r_hit);
                 float disc_denom = 1.0f - 3.0f * p.M / r_hit + 2.0f * p.a * sqrt_M / (r_hit * r_sqrt);
                 if (disc_denom > 0.0f)
@@ -180,6 +254,19 @@ __device__ float3 trace_ray(
                     float u = denom > 0.0f ? (r_hit - disk_inner) / denom : 0.0f;
                     float sampled = tex1D<float>(disk_tex, u);
                     float T = CONFIG_DISK_TEMPERATURE_SCALE * sampled * g;
+                    if (p.disk_noise_enabled && p.disk_noise_detail > 0 && p.disk_noise_strength != 0.0f)
+                    {
+                        float r3 = r_hit * r_hit * r_hit;
+                        float omega = 1.0f / (p.a + __fsqrt_rn(r3 * p.inv_M));
+                        float spiral_phase = phi_hit + p.disk_noise_winding * omega;
+                        float s_spiral, c_spiral;
+                        __sincosf(spiral_phase, &s_spiral, &c_spiral);
+                        float nu = r_hit * c_spiral * p.disk_noise_scale;
+                        float nv = r_hit * s_spiral * p.disk_noise_scale;
+                        float noise_val = fbm(nu, nv, p.disk_noise_detail);
+                        float modulator = 1.0f + p.disk_noise_strength * (noise_val - 0.5f);
+                        T *= modulator;
+                    }
                     if (isfinite(T) && T > 0.0f)
                     {
                         float3 d_col = fetch_color_from_lut(T, lut_tex, lut_size, max_temp, error_flag);

@@ -22,6 +22,7 @@ pub struct Config {
     pub blackbody: BlackbodyConfig,
     pub cuda: CudaConfig,
     pub kernel: KernelConfig,
+    pub disk_noise: DiskNoiseConfig,
 }
 #[derive(Debug, Deserialize, Clone)]
 pub struct WindowConfig {
@@ -74,6 +75,14 @@ pub struct BlackbodyConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct CudaConfig {
     pub use_fast_math: bool,
+}
+#[derive(Debug, Deserialize, Clone)]
+pub struct DiskNoiseConfig {
+    pub enabled: bool,
+    pub scale: f32,
+    pub strength: f32,
+    pub winding: f32,
+    pub detail: u32,
 }
 #[derive(Debug, Deserialize, Clone)]
 pub struct KernelConfig {
