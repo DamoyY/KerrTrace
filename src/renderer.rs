@@ -37,6 +37,7 @@ pub struct CudaRenderer {
     disk_texture: CudaTextureLut,
     lut_size: i32,
     lut_max_temp: f32,
+    lut_error_flag: CudaSlice<u32>,
     disk_inner: f32,
     disk_outer: f32,
     width: u32,
@@ -89,6 +90,9 @@ impl CudaRenderer {
             .context("allocate 图像缓存失败")?;
         let host_image = unsafe { context.alloc_pinned::<u32>((u_width * u_height) as usize) }
             .context("allocate 固定主机内存失败")?;
+        let lut_error_flag = stream
+            .alloc_zeros::<u32>(2)
+            .context("allocate LUT 错误标记失败")?;
         let block_x = config.renderer.block_dim[0];
         let block_y = config.renderer.block_dim[1];
         let grid_x = u_width.div_ceil(block_x);
@@ -113,6 +117,7 @@ impl CudaRenderer {
             disk_texture,
             lut_size,
             lut_max_temp,
+            lut_error_flag,
             disk_inner: kerr_params.disk_inner,
             disk_outer: config.kernel.disk.outer_radius,
             width: u_width,
@@ -135,6 +140,9 @@ impl CudaRenderer {
             block_dim: self.block_dim,
             shared_mem_bytes: 0,
         };
+        self.stream
+            .memset_zeros(&mut self.lut_error_flag)
+            .context("清零 LUT 错误标记失败")?;
         let width = i32::try_from(self.width).context("Window width exceeds i32 range")?;
         let height = i32::try_from(self.height).context("Window height exceeds i32 range")?;
         unsafe {
@@ -150,12 +158,24 @@ impl CudaRenderer {
                 .arg(&self.lut_texture.texture)
                 .arg(&self.lut_size)
                 .arg(&self.lut_max_temp)
+                .arg(&mut self.lut_error_flag)
                 .arg(&self.disk_texture.texture)
                 .arg(&self.disk_inner)
                 .arg(&self.disk_outer)
                 .arg(&fov_scale)
                 .launch(launch_config)
                 .context("Failed to launch kernel")?;
+        }
+        let mut lut_error_state = [0u32; 2];
+        self.stream
+            .memcpy_dtoh(&self.lut_error_flag, &mut lut_error_state)
+            .context("读取 LUT 温度错误标记失败")?;
+        if lut_error_state[0] != 0 {
+            let temp = f32::from_bits(lut_error_state[1]);
+            return Err(anyhow!(
+                "颜色温度超过 lut_max_temp: {temp} > {}",
+                self.lut_max_temp
+            ));
         }
         self.stream
             .memcpy_dtoh(&self.image_gpu, &mut self.host_image)

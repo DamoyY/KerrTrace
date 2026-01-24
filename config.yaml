@@ -28,7 +28,7 @@ hud:
   color: [255, 255, 255, 255]
 blackbody:
   lut_size: 4096
-  lut_max_temp: 1e5
+  lut_max_temp: 3e4
   wavelength_start: 380.0
   wavelength_end: 720.0
   wavelength_step: 10.0

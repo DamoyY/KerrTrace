@@ -76,7 +76,8 @@ __device__ float3 trace_ray(
     float max_temp,
     cudaTextureObject_t disk_tex,
     float disk_inner,
-    float disk_outer)
+    float disk_outer,
+    unsigned int *error_flag)
 {
     const KerrParams &p = c_params;
     float3 ray_n = normalize(ray_dir);
@@ -181,7 +182,7 @@ __device__ float3 trace_ray(
                     float T = CONFIG_DISK_TEMPERATURE_SCALE * sampled * g;
                     if (isfinite(T) && T > 0.0f)
                     {
-                        float3 d_col = fetch_color_from_lut(fminf(T, max_temp), lut_tex, lut_size, max_temp);
+                        float3 d_col = fetch_color_from_lut(T, lut_tex, lut_size, max_temp, error_flag);
                         float luma = 0.2126f * d_col.x + 0.7152f * d_col.y + 0.0722f * d_col.z;
                         float luma_scaled = luma / CONFIG_BLACKBODY_WAVELENGTH_STEP;
                         float alpha = 1.0f - __expf(-luma_scaled * 0.5f);

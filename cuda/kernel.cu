@@ -1,6 +1,14 @@
-__device__ __forceinline__ float3 fetch_color_from_lut(float T, cudaTextureObject_t lut_tex, int lut_size, float max_temp)
+__device__ __forceinline__ float3 fetch_color_from_lut(float T, cudaTextureObject_t lut_tex, int lut_size, float max_temp, unsigned int *error_flag)
 {
-    float t_norm = fminf(fmaxf(T, 0.0f), max_temp) / max_temp;
+    if (T > max_temp)
+    {
+        if (atomicCAS(error_flag, 0u, 1u) == 0u)
+        {
+            error_flag[1] = __float_as_uint(T);
+        }
+        return make_float3(0.0f, 0.0f, 0.0f);
+    }
+    float t_norm = fmaxf(T, 0.0f) / max_temp;
     float pos = t_norm * (float)(lut_size - 1);
     float u = (pos + 0.5f) / (float)lut_size;
     float4 c = tex1D<float4>(lut_tex, u);
@@ -59,7 +67,7 @@ extern "C"
         float fwd_x, float fwd_y, float fwd_z,
         float rgt_x, float rgt_y, float rgt_z,
         float up_x, float up_y, float up_z,
-        cudaTextureObject_t lut_tex, int lut_size, float max_temp,
+        cudaTextureObject_t lut_tex, int lut_size, float max_temp, unsigned int *error_flag,
         cudaTextureObject_t disk_tex, float disk_inner, float disk_outer,
         float fov_scale)
     {
@@ -96,7 +104,8 @@ extern "C"
                 max_temp,
                 disk_tex,
                 disk_inner,
-                disk_outer);
+                disk_outer,
+                error_flag);
             accumulated_color.x += sample_color.x;
             accumulated_color.y += sample_color.y;
             accumulated_color.z += sample_color.z;
