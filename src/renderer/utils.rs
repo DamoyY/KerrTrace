@@ -3,7 +3,7 @@ use std::fmt::Display;
 use anyhow::{Result, anyhow};
 use log::error;
 
-use super::KerrParams;
+use super::init::KerrParams;
 use crate::{KernelConfig, math::f32_from_f64};
 fn calc_isco(a_norm: f32, prograde: bool, mass: f32) -> f32 {
     let aa = a_norm * a_norm;

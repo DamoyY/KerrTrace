@@ -9,9 +9,45 @@ use winit::{
     window::{WindowAttributes, WindowId},
 };
 
-use crate::math::f32_from_f64;
 use super::App;
+use crate::math::f32_from_f64;
+impl App {
+    pub(super) fn update_fps(&mut self, rendered: bool) {
+        if rendered {
+            self.fps_frames += 1;
+        }
+        let elapsed = self.fps_last_instant.elapsed();
+        if elapsed >= std::time::Duration::from_secs(1) {
+            let elapsed_secs = elapsed.as_secs_f64();
+            if self.fps_frames == 0 {
+                self.fps_value = 0.0;
+            } else {
+                let fps = f64::from(self.fps_frames) / elapsed_secs;
+                match f32_from_f64(fps) {
+                    Ok(value) => self.fps_value = value,
+                    Err(err) => {
+                        error!("FPS 计算失败: {err}");
+                        self.fps_value = 0.0;
+                    }
+                }
+            }
+            self.fps_frames = 0;
+            self.fps_last_instant = std::time::Instant::now();
+        }
+    }
 
+    pub(super) fn throttle_if_needed(&mut self) {
+        if !self.config.window.vsync {
+            return;
+        }
+        let target = std::time::Duration::from_secs_f32(1.0 / 60.0);
+        let elapsed = self.last_present.elapsed();
+        if let Some(remaining) = target.checked_sub(elapsed) {
+            std::thread::sleep(remaining);
+        }
+        self.last_present = std::time::Instant::now();
+    }
+}
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {

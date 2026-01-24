@@ -1,22 +1,15 @@
 mod input;
-use std::{
-    collections::HashSet,
-    num::NonZeroU32,
-    path::Path,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashSet, num::NonZeroU32, path::Path, sync::Arc, time::Instant};
 
 use anyhow::{Context, Result, anyhow};
 use glam::Vec3;
-use log::error;
 use softbuffer::{Context as SoftContext, Surface};
 use winit::{keyboard::KeyCode, window::Window};
 
 use crate::{
     Config,
     hud::{self, HudLayout, TextStyle, draw_hud},
-    math::{calculate_camera_basis, f32_from_f64},
+    math::calculate_camera_basis,
     renderer::CudaRenderer,
 };
 pub struct App {
@@ -275,41 +268,5 @@ impl App {
             info_text,
             fps_text,
         })
-    }
-
-    fn update_fps(&mut self, rendered: bool) {
-        if rendered {
-            self.fps_frames += 1;
-        }
-        let elapsed = self.fps_last_instant.elapsed();
-        if elapsed >= Duration::from_secs(1) {
-            let elapsed_secs = elapsed.as_secs_f64();
-            if self.fps_frames == 0 {
-                self.fps_value = 0.0;
-            } else {
-                let fps = f64::from(self.fps_frames) / elapsed_secs;
-                match f32_from_f64(fps) {
-                    Ok(value) => self.fps_value = value,
-                    Err(err) => {
-                        error!("FPS 计算失败: {err}");
-                        self.fps_value = 0.0;
-                    }
-                }
-            }
-            self.fps_frames = 0;
-            self.fps_last_instant = Instant::now();
-        }
-    }
-
-    fn throttle_if_needed(&mut self) {
-        if !self.config.window.vsync {
-            return;
-        }
-        let target = Duration::from_secs_f32(1.0 / 60.0);
-        let elapsed = self.last_present.elapsed();
-        if let Some(remaining) = target.checked_sub(elapsed) {
-            std::thread::sleep(remaining);
-        }
-        self.last_present = Instant::now();
     }
 }
