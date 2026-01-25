@@ -57,6 +57,8 @@ __device__ float3 trace_ray(
     static const float a71 = 35.0f / 384.0f, a73 = 500.0f / 1113.0f, a74 = 125.0f / 192.0f, a75 = -2187.0f / 6784.0f, a76 = 11.0f / 84.0f;
     static const float b1 = 35.0f / 384.0f, b3 = 500.0f / 1113.0f, b4 = 125.0f / 192.0f, b5 = -2187.0f / 6784.0f, b6 = 11.0f / 84.0f;
     static const float dc1 = 35.0f / 384.0f - 5179.0f / 57600.0f, dc3 = 500.0f / 1113.0f - 7571.0f / 16695.0f, dc4 = 125.0f / 192.0f - 393.0f / 640.0f, dc5 = -2187.0f / 6784.0f + 92097.0f / 339200.0f, dc6 = 11.0f / 84.0f - 187.0f / 2100.0f, dc7 = -1.0f / 40.0f;
+    RayDerivs fsal_k1;
+    bool have_fsal = false;
     for (int i = 0; i < CONFIG_INTEGRATOR_MAX_STEPS && transmittance > CONFIG_TRANSMITTANCE_CUTOFF; i++)
     {
         RayDerivs k1, k2, k3, k4, k5, k6, k7;
@@ -67,14 +69,25 @@ __device__ float3 trace_ray(
         float denomH = fmaf(r2_curr, r2_curr, p.aa * s.y * s.y);
         float H = p.M * r_curr * r2_curr * __fdividef(1.0f, denomH);
         float t = __fdividef(H - tol_potential_far, tol_potential_near - tol_potential_far);
+        t = fminf(fmaxf(t, 0.0f), 1.0f);
         float tol = base_tol * (tol_max_scale - tol_max_scale * t);
         int attempts = 0;
         bool accepted = false;
         float h_used = h;
+        bool k1_ready = false;
+        if (have_fsal)
+        {
+            k1 = fsal_k1;
+            k1_ready = true;
+        }
         while (!accepted && attempts < CONFIG_INTEGRATOR_MAX_ATTEMPTS)
         {
             float h_step = h;
-            k1 = get_derivs(s, pt);
+            if (!k1_ready)
+            {
+                k1 = get_derivs(s, pt);
+                k1_ready = true;
+            }
             k2 = get_derivs({s.x + h_step * a21 * k1.dx, s.y + h_step * a21 * k1.dy, s.z + h_step * a21 * k1.dz, s.px + h_step * a21 * k1.dpx, s.py + h_step * a21 * k1.dpy, s.pz + h_step * a21 * k1.dpz}, pt);
             k3 = get_derivs({s.x + h_step * (a31 * k1.dx + a32 * k2.dx), s.y + h_step * (a31 * k1.dy + a32 * k2.dy), s.z + h_step * (a31 * k1.dz + a32 * k2.dz), s.px + h_step * (a31 * k1.dpx + a32 * k2.dpx), s.py + h_step * (a31 * k1.dpy + a32 * k2.dpy), s.pz + h_step * (a31 * k1.dpz + a32 * k2.dpz)}, pt);
             k4 = get_derivs({s.x + h_step * (a41 * k1.dx + a42 * k2.dx + a43 * k3.dx), s.y + h_step * (a41 * k1.dy + a42 * k2.dy + a43 * k3.dy), s.z + h_step * (a41 * k1.dz + a42 * k2.dz + a43 * k3.dz), s.px + h_step * (a41 * k1.dpx + a42 * k2.dpx + a43 * k3.dpx), s.py + h_step * (a41 * k1.dpy + a42 * k2.dpy + a43 * k3.dpy), s.pz + h_step * (a41 * k1.dpz + a42 * k2.dpz + a43 * k3.dpz)}, pt);
@@ -110,6 +123,15 @@ __device__ float3 trace_ray(
         float prev_x = s.x, prev_y = s.y, prev_z = s.z;
         float prev_px = s.px, prev_py = s.py, prev_pz = s.pz;
         s = next_s;
+        if (accepted)
+        {
+            fsal_k1 = k7;
+            have_fsal = true;
+        }
+        else
+        {
+            have_fsal = false;
+        }
         float r_now = ks_r_from_xyz(s.x, s.y, s.z, p.aa);
         if (r_now < p.rh + CONFIG_HORIZON_EPSILON)
             break;
@@ -118,27 +140,32 @@ __device__ float3 trace_ray(
             float t_low = 0.0f;
             float t_high = 1.0f;
             float y_low = prev_y;
-            for (int j = 0; j < 6; j++)
+            float y_high = s.y;
+            float denom = y_low - y_high;
+            float t = denom != 0.0f ? __fdividef(y_low, denom) : 0.5f;
+            t = fminf(fmaxf(t, t_low), t_high);
+            for (int j = 0; j < 4; j++)
             {
-                float t_mid = 0.5f * (t_low + t_high);
-                float y_mid = dp_dense_output(prev_y, s.y, k1.dy, k3.dy, k4.dy, k5.dy, k6.dy, k7.dy, h_used, t_mid);
-                if (y_mid == 0.0f)
+                float y_t = dp_dense_output(prev_y, s.y, k1.dy, k3.dy, k4.dy, k5.dy, k6.dy, k7.dy, h_used, t);
+                if (y_t == 0.0f)
                 {
-                    t_low = t_mid;
-                    t_high = t_mid;
+                    t_low = t;
+                    t_high = t;
                     break;
                 }
-                if ((y_mid >= 0.0f) == (y_low >= 0.0f))
+                if ((y_t >= 0.0f) == (y_low >= 0.0f))
                 {
-                    t_low = t_mid;
-                    y_low = y_mid;
+                    t_low = t;
+                    y_low = y_t;
                 }
                 else
                 {
-                    t_high = t_mid;
+                    t_high = t;
+                    y_high = y_t;
                 }
+                float dy_dt = dp_dense_output_derivative(prev_y, s.y, k1.dy, k3.dy, k4.dy, k5.dy, k6.dy, k7.dy, h_used, t);
+                float t = dy_dt != 0.0f ? t - __fdividef(y_t, dy_dt) : 0.5f * (t_low + t_high);
             }
-            float t = 0.5f * (t_low + t_high);
             float x_hit = dp_dense_output(prev_x, s.x, k1.dx, k3.dx, k4.dx, k5.dx, k6.dx, k7.dx, h_used, t);
             float z_hit = dp_dense_output(prev_z, s.z, k1.dz, k3.dz, k4.dz, k5.dz, k6.dz, k7.dz, h_used, t);
             float px_hit = dp_dense_output(prev_px, s.px, k1.dpx, k3.dpx, k4.dpx, k5.dpx, k6.dpx, k7.dpx, h_used, t);
