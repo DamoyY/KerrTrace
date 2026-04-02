@@ -1,17 +1,15 @@
-use std::{fs, path::Path, sync::Arc};
-
-use anyhow::{Context, Result, anyhow};
-use cudarc::{
-    driver::{CudaContext, CudaFunction, CudaSlice, CudaStream, DeviceRepr, PinnedHostSlice},
-    nvrtc::{CompileOptions, compile_ptx_with_opts},
-};
-
 use super::{
     blackbody::generate_blackbody_lut,
     texture::{CudaTextureLut, create_disk_texture, create_lut_texture},
     utils::{build_cuda_defines, generate_disk_temperature_lut},
 };
 use crate::Config;
+use anyhow::{Context, Result, anyhow};
+use cudarc::{
+    driver::{CudaContext, CudaFunction, CudaSlice, CudaStream, DeviceRepr, PinnedHostSlice},
+    nvrtc::{CompileOptions, compile_ptx_with_opts},
+};
+use std::{fs, path::Path, sync::Arc};
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(super) struct KerrParams {

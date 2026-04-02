@@ -1,8 +1,6 @@
+use crate::math::{ensure_finite_f32, f32_from_f64_with_context};
 use anyhow::{Result, anyhow};
 use log::error;
-
-use crate::math::{ensure_finite_f32, f32_from_f64_with_context};
-
 fn gaussian(x: f32, alpha: f32, mu: f32, sigma1: f32, sigma2: f32) -> f32 {
     let sigma = if x < mu { sigma1 } else { sigma2 };
     let t = (x - mu) / sigma;

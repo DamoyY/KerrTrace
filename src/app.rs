@@ -1,17 +1,15 @@
 mod input;
-use std::{collections::HashSet, num::NonZeroU32, path::Path, sync::Arc, time::Instant};
-
-use anyhow::{Context, Result, anyhow};
-use glam::Vec3;
-use softbuffer::{Context as SoftContext, Surface};
-use winit::{keyboard::KeyCode, window::Window};
-
 use crate::{
     Config,
     hud::{self, HudLayout, TextStyle, draw_hud},
     math::{calculate_camera_basis, ensure_finite_f32, ensure_finite_vec3},
     renderer::CudaRenderer,
 };
+use anyhow::{Context, Result, anyhow};
+use glam::Vec3;
+use softbuffer::{Context as SoftContext, Surface};
+use std::{collections::HashSet, num::NonZeroU32, path::Path, sync::Arc, time::Instant};
+use winit::{keyboard::KeyCode, window::Window};
 pub struct App {
     config: Config,
     window: Option<Arc<Window>>,
@@ -39,7 +37,6 @@ pub struct App {
 impl App {
     const FOV_EPSILON: f32 = 1e-4;
     const ROTATION_EPSILON: f32 = 1e-4;
-
     pub(crate) fn new(config: Config) -> Self {
         let cam_pos = Vec3::from_array(config.camera.position);
         let now = Instant::now();
@@ -69,7 +66,6 @@ impl App {
             fps_value: 0.0,
         }
     }
-
     fn init_renderer(&mut self) -> Result<()> {
         let window = self.window.as_ref().context("Window not initialized")?;
         let context = SoftContext::new(window.clone())
@@ -90,7 +86,6 @@ impl App {
         self.renderer = Some(renderer);
         Ok(())
     }
-
     fn update_camera(&mut self) -> Result<()> {
         let (fwd, rgt, _up) = calculate_camera_basis(self.cam_yaw, self.cam_pitch);
         let elapsed = self.last_camera_update.elapsed();
@@ -122,7 +117,6 @@ impl App {
         self.clamp_camera_to_escape_radius()?;
         Ok(())
     }
-
     fn clamp_camera_to_escape_radius(&mut self) -> Result<()> {
         let cam_pos = ensure_finite_vec3(self.cam_pos, "摄像机位置")?;
         let escape_radius =
@@ -137,7 +131,6 @@ impl App {
         }
         Ok(())
     }
-
     fn render(&mut self) -> Result<()> {
         if self.window.is_none() {
             return Ok(());
@@ -154,7 +147,6 @@ impl App {
         }
         Ok(())
     }
-
     fn update_render_if_needed(&mut self) -> Result<bool> {
         if !self.should_render() {
             return Ok(false);
@@ -180,7 +172,6 @@ impl App {
         }
         Ok(submitted)
     }
-
     fn should_render(&self) -> bool {
         if !self.has_frame {
             return true;
@@ -196,7 +187,6 @@ impl App {
         }
         (self.fov - self.prev_fov).abs() > Self::FOV_EPSILON
     }
-
     fn present_frame(&mut self) -> Result<bool> {
         if !self.has_frame {
             return Ok(false);
@@ -259,7 +249,6 @@ impl App {
         }
         Ok(true)
     }
-
     fn build_hud_layout(&self, width: u32, height: u32) -> Result<HudLayout> {
         let margin_x =
             i32::try_from(self.config.hud.margin[0]).context("HUD margin_x exceeds i32 range")?;

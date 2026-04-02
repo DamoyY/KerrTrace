@@ -1,21 +1,19 @@
-use std::fmt::Display;
-
-use anyhow::{Result, anyhow};
-use log::error;
-
 use super::init::KerrParams;
 use crate::{
     Config, KernelConfig,
     math::{ensure_finite_f32, f32_from_f64_with_context},
 };
+use anyhow::{Result, anyhow};
+use core::fmt::Display;
+use log::error;
 fn calc_isco(a_norm: f32, prograde: bool, mass: f32) -> f32 {
     let aa = a_norm * a_norm;
     let z1 = (1.0 - aa)
         .cbrt()
         .mul_add((1.0 + a_norm).cbrt() + (1.0 - a_norm).cbrt(), 1.0);
-    let z2 = (3.0f32).mul_add(aa, z1 * z1).sqrt();
+    let z2 = (3.0_f32).mul_add(aa, z1 * z1).sqrt();
     let sign = if prograde { -1.0 } else { 1.0 };
-    let term_inside = (3.0 - z1) * (2.0f32.mul_add(z2, 3.0 + z1));
+    let term_inside = (3.0 - z1) * (2.0_f32.mul_add(z2, 3.0 + z1));
     mass * (3.0 + z2 + sign * term_inside.max(0.0).sqrt())
 }
 fn calc_novikov_thorne_factor(r: f32, a_norm: f32, r_isco: f32, inv_m: f32) -> f32 {
@@ -33,7 +31,7 @@ fn calc_novikov_thorne_factor(r: f32, a_norm: f32, r_isco: f32, inv_m: f32) -> f
         2.0 * (angle_base - ang_step).cos(),
         2.0 * (angle_base + ang_step).cos(),
     ];
-    let mut sum_log = 0.0f32;
+    let mut sum_log = 0.0_f32;
     for i in 0..3 {
         let xi = roots[i];
         let denom = xi * (xi - roots[(i + 1) % 3]) * (xi - roots[(i + 2) % 3]);
@@ -47,7 +45,7 @@ fn calc_novikov_thorne_factor(r: f32, a_norm: f32, r_isco: f32, inv_m: f32) -> f
         }
     }
     let q = (1.5 * a_norm).mul_add(-(x / x_ms).ln(), x - x_ms) - sum_log;
-    let geometric_denom = r_norm * (2.0f32).mul_add(a_norm, r_norm.mul_add(x, -(3.0 * x)));
+    let geometric_denom = r_norm * (2.0_f32).mul_add(a_norm, r_norm.mul_add(x, -(3.0 * x)));
     (q / geometric_denom).max(0.0)
 }
 pub(super) fn build_kerr_params(config: &Config) -> Result<KerrParams> {

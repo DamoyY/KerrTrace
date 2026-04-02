@@ -1,9 +1,8 @@
+mod blackbody;
 mod init;
 mod texture;
 mod utils;
-mod blackbody;
-use std::{collections::VecDeque, path::Path, sync::Arc};
-
+use crate::Config;
 use anyhow::{Context, Result, anyhow};
 use cudarc::driver::{
     CudaContext, CudaEvent, CudaFunction, CudaSlice, CudaStream, LaunchConfig, PinnedHostSlice,
@@ -13,10 +12,9 @@ use init::{
     RendererBuffers, allocate_buffers, build_cuda_kernels, build_textures, compute_launch_dims,
     validate_bloom_settings,
 };
+use std::{collections::VecDeque, path::Path, sync::Arc};
 use texture::CudaTextureLut;
 use utils::build_kerr_params;
-
-use crate::Config;
 pub struct FrameView<'a> {
     pub index: usize,
     pub data: &'a [u32],
@@ -42,7 +40,6 @@ impl FrameBuffer {
             ready_event: None,
         }
     }
-
     fn is_ready(&self) -> bool {
         self.ready_event
             .as_ref()
@@ -115,7 +112,6 @@ impl CudaRenderer {
             bloom_radius_int,
         })
     }
-
     pub fn submit_render(
         &mut self,
         cam_pos: [f32; 3],
@@ -216,7 +212,6 @@ impl CudaRenderer {
         self.next_frame = (frame_index + 1) % frame_count;
         Ok(true)
     }
-
     pub fn ready_frame(&mut self) -> Result<Option<FrameView<'_>>> {
         let lut_max_temp = self.lut_max_temp;
         let Some(frame_index) = self.pending_frames.front().copied() else {
@@ -248,7 +243,6 @@ impl CudaRenderer {
             data: host_image,
         }))
     }
-
     pub fn finish_frame(&mut self, index: usize) -> Result<()> {
         let expected = self.pending_frames.front().copied().context("帧队列为空")?;
         if expected != index {
@@ -258,7 +252,6 @@ impl CudaRenderer {
         self.frames[index].ready_event = None;
         Ok(())
     }
-
     fn next_available_frame(&self) -> Result<usize> {
         if self.frames.is_empty() {
             return Err(anyhow!("帧缓冲区未初始化"));
@@ -271,7 +264,6 @@ impl CudaRenderer {
         }
         Err(anyhow!("没有可用帧缓冲区"))
     }
-
     fn post_shared_mem_bytes(&self, bloom_active: bool) -> Result<u32> {
         if !bloom_active {
             return Ok(0);

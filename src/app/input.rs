@@ -1,6 +1,7 @@
-use std::sync::Arc;
-
+use super::App;
+use crate::math::f32_from_f64;
 use log::error;
+use std::sync::Arc;
 use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, ElementState, WindowEvent},
@@ -8,16 +9,13 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::{WindowAttributes, WindowId},
 };
-
-use super::App;
-use crate::math::f32_from_f64;
 impl App {
     pub(super) fn update_fps(&mut self, rendered: bool) {
         if rendered {
             self.fps_frames += 1;
         }
         let elapsed = self.fps_last_instant.elapsed();
-        if elapsed >= std::time::Duration::from_secs(1) {
+        if elapsed >= core::time::Duration::from_secs(1) {
             let elapsed_secs = elapsed.as_secs_f64();
             if self.fps_frames == 0 {
                 self.fps_value = 0.0;
@@ -35,7 +33,6 @@ impl App {
             self.fps_last_instant = std::time::Instant::now();
         }
     }
-
     pub(super) fn throttle_if_needed(&mut self) {
         if !self.config.window.vsync {
             return;
@@ -72,7 +69,6 @@ impl ApplicationHandler for App {
             }
         }
     }
-
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -155,7 +151,6 @@ impl ApplicationHandler for App {
             _ => (),
         }
     }
-
     fn device_event(
         &mut self,
         _event_loop: &ActiveEventLoop,

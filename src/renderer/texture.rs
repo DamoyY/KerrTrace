@@ -1,10 +1,9 @@
-use std::{ffi::c_void, mem, ptr};
-
 use anyhow::{Context, Result, anyhow};
 use cudarc::{
     driver::CudaStream,
     runtime::{result::RuntimeError, sys as cuda_sys},
 };
+use std::{ffi::c_void, mem, ptr};
 pub(super) struct CudaTextureLut {
     pub(super) texture: cuda_sys::cudaTextureObject_t,
     pub(super) array: cuda_sys::cudaArray_t,

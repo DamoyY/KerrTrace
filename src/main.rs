@@ -2,14 +2,13 @@ mod app;
 mod hud;
 mod math;
 mod renderer;
-use std::{fmt, fs::File, path::Path};
-
 use anyhow::{Context, Result};
 use app::App;
 use serde::{
     Deserialize,
     de::{self, Deserializer, Visitor},
 };
+use std::{fmt, fs::File, path::Path};
 use winit::event_loop::{ControlFlow, EventLoop};
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
@@ -127,18 +126,15 @@ where
     struct U32Visitor;
     impl Visitor<'_> for U32Visitor {
         type Value = u32;
-
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter.write_str("a non-negative integer")
         }
-
         fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
         where
             E: de::Error,
         {
             u32::try_from(value).map_err(|_| E::custom("integer out of range for u32"))
         }
-
         fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
         where
             E: de::Error,
@@ -148,7 +144,6 @@ where
             }
             u32::try_from(value).map_err(|_| E::custom("integer out of range for u32"))
         }
-
         fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
         where
             E: de::Error,
@@ -167,7 +162,6 @@ where
                 .parse::<u32>()
                 .map_err(|_| E::custom("number out of range for u32"))
         }
-
         fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
         where
             E: de::Error,
@@ -177,7 +171,6 @@ where
                 .map_err(|_| E::custom("failed to parse number"))?;
             self.visit_f64(parsed)
         }
-
         fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
         where
             E: de::Error,

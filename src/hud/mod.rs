@@ -66,8 +66,8 @@ impl<'a> DrawContext<'a> {
             usize::try_from(width).map_err(|_| anyhow!("HUD 宽度无法转换为 usize: {width}"))?;
         let scale = i32::try_from(style.scale)
             .map_err(|_| anyhow!("HUD 缩放比例超出 i32 范围: {}", style.scale))?;
-        let color = (u32::from(style.color[0]) << 16)
-            | (u32::from(style.color[1]) << 8)
+        let color = (u32::from(style.color[0]) << 16_i32)
+            | (u32::from(style.color[1]) << 8_i32)
             | u32::from(style.color[2]);
         Ok(Self {
             buffer,
@@ -78,7 +78,6 @@ impl<'a> DrawContext<'a> {
             scale,
         })
     }
-
     fn draw_text(&mut self, x: i32, y: i32, text: &str) -> Result<()> {
         let mut cursor_x = x;
         let mut cursor_y = y;
@@ -99,24 +98,24 @@ impl<'a> DrawContext<'a> {
         }
         Ok(())
     }
-
     fn draw_char(&mut self, x: i32, y: i32, ch: char) -> Result<()> {
         let glyph = glyphs::glyph_pattern(ch);
         for (row, bits) in glyph.iter().enumerate() {
             let row_i =
                 i32::try_from(row).map_err(|_| anyhow!("HUD 字符行索引超出 i32 范围: {row}"))?;
             for col in 0..GLYPH_WIDTH {
-                let shift = u32::try_from(GLYPH_WIDTH - 1 - col)
-                    .map_err(|_| anyhow!("HUD 位移量超出 u32 范围: {}", GLYPH_WIDTH - 1 - col))?;
-                let mask = 1u8 << shift;
+                let shift = u32::try_from(GLYPH_WIDTH - 1_i32 - col).map_err(|_| {
+                    anyhow!("HUD 位移量超出 u32 范围: {}", GLYPH_WIDTH - 1_i32 - col)
+                })?;
+                let mask = 1_u8 << shift;
                 if (bits & mask) == 0 {
                     continue;
                 }
                 let px = x + col * self.scale;
                 let py = y + row_i * self.scale;
-                for dy in 0..self.scale {
+                for dy in 0_i32..self.scale {
                     let iy = py + dy;
-                    if iy < 0 || iy >= self.height {
+                    if iy < 0_i32 || iy >= self.height {
                         continue;
                     }
                     let row_index =
@@ -124,9 +123,9 @@ impl<'a> DrawContext<'a> {
                     let row_offset = row_index
                         .checked_mul(self.width_usize)
                         .ok_or_else(|| anyhow!("HUD 行偏移计算溢出"))?;
-                    for dx in 0..self.scale {
+                    for dx in 0_i32..self.scale {
                         let ix = px + dx;
-                        if ix < 0 || ix >= self.width {
+                        if ix < 0_i32 || ix >= self.width {
                             continue;
                         }
                         let col_index =
