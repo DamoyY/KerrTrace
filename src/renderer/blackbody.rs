@@ -105,9 +105,9 @@ pub(super) fn generate_blackbody_lut(
         let mut y_sum = 0.0;
         let mut z_sum = 0.0;
         for i in 0..lambdas.len() {
-            x_sum += intensities[i] * xs[i];
-            y_sum += intensities[i] * ys[i];
-            z_sum += intensities[i] * zs[i];
+            x_sum = intensities[i].mul_add(xs[i], x_sum);
+            y_sum = intensities[i].mul_add(ys[i], y_sum);
+            z_sum = intensities[i].mul_add(zs[i], z_sum);
         }
         x_sum *= wavelength_step;
         y_sum *= wavelength_step;

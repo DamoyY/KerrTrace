@@ -113,40 +113,40 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            WindowEvent::MouseInput { state, button, .. } => {
-                if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
-                    self.mouse_locked = true;
-                    if let Some(w) = &self.window {
-                        w.set_cursor_visible(false);
-                        if let Err(err) = w.set_cursor_grab(winit::window::CursorGrabMode::Confined)
-                            && let Err(fallback_err) =
-                                w.set_cursor_grab(winit::window::CursorGrabMode::Locked)
-                        {
-                            error!("鼠标捕获失败: confined={err}, locked={fallback_err}");
-                        }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: winit::event::MouseButton::Left,
+                ..
+            } => {
+                self.mouse_locked = true;
+                if let Some(w) = &self.window {
+                    w.set_cursor_visible(false);
+                    if let Err(err) = w.set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                        && let Err(fallback_err) =
+                            w.set_cursor_grab(winit::window::CursorGrabMode::Locked)
+                    {
+                        error!("鼠标捕获失败: confined={err}, locked={fallback_err}");
                     }
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                if self.mouse_locked {
-                    let scroll = match delta {
-                        winit::event::MouseScrollDelta::LineDelta(_, y) => Ok(y),
-                        winit::event::MouseScrollDelta::PixelDelta(pos) => {
-                            f32_from_f64(pos.y).map(|value| value / 120.0)
-                        }
-                    };
-                    let scroll = match scroll {
-                        Ok(value) => value,
-                        Err(err) => {
-                            error!("滚轮输入转换失败: {err}");
-                            return;
-                        }
-                    };
-                    self.fov -= scroll * self.config.camera.zoom_speed;
-                    let min_fov = self.config.camera.fov_limit[0];
-                    let max_fov = self.config.camera.fov_limit[1];
-                    self.fov = self.fov.clamp(min_fov, max_fov);
-                }
+            WindowEvent::MouseWheel { delta, .. } if self.mouse_locked => {
+                let scroll = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => Ok(y),
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => {
+                        f32_from_f64(pos.y).map(|value| value / 120.0)
+                    }
+                };
+                let scroll = match scroll {
+                    Ok(value) => value,
+                    Err(err) => {
+                        error!("滚轮输入转换失败: {err}");
+                        return;
+                    }
+                };
+                self.fov -= scroll * self.config.camera.zoom_speed;
+                let min_fov = self.config.camera.fov_limit[0];
+                let max_fov = self.config.camera.fov_limit[1];
+                self.fov = self.fov.clamp(min_fov, max_fov);
             }
             _ => (),
         }
@@ -176,8 +176,8 @@ impl ApplicationHandler for App {
                     return;
                 }
             };
-            self.cam_yaw += dx * sensitivity;
-            self.cam_pitch -= dy * sensitivity;
+            self.cam_yaw = dx.mul_add(sensitivity, self.cam_yaw);
+            self.cam_pitch = dy.mul_add(-sensitivity, self.cam_pitch);
             let min_p = self.config.camera.pitch_limit[0];
             let max_p = self.config.camera.pitch_limit[1];
             self.cam_pitch = self.cam_pitch.clamp(min_p, max_p);
