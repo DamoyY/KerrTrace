@@ -1,5 +1,5 @@
 mod blackbody;
-mod defines;
+mod compiler;
 mod disk;
 mod frame;
 #[cfg(test)]
@@ -14,6 +14,9 @@ mod pipeline;
 mod spectral;
 mod submit;
 mod texture;
+#[cfg(test)]
+#[path = "../tests/integration/toolchain.rs"]
+mod toolchain;
 use crate::config::Config;
 use alloc::{collections::VecDeque, sync::Arc};
 use anyhow::{Context as _, Result};

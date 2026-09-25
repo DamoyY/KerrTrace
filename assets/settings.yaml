@@ -36,7 +36,7 @@ cuda:
   use_fast_math: true
 kernel:
   spp: 4
-  exposure_scale: 3e-3
+  exposure_scale: 1e-2
   sky:
     grid_divisions: 40
     line_thickness: 5e-4

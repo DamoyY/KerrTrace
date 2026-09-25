@@ -1,12 +1,32 @@
 use crate::config::scene::KernelConfig;
+use anyhow::{Context as _, Result};
 use core::fmt::Display;
+use cudarc::nvrtc::{CompileOptions, Ptx, compile_ptx_with_opts};
+use std::path::Path;
+pub(super) const CUDA_STANDARD: &str = "c++17";
+pub(super) fn build_cuda_source(config: &KernelConfig) -> String {
+    format!("{}\n#include \"kernel.cu\"\n", build_cuda_defines(config))
+}
+pub(super) fn compile_cuda(source: &str, cuda_dir: &Path, fast_math: bool) -> Result<Ptx> {
+    let options = CompileOptions {
+        include_paths: vec![cuda_dir.to_str().context("CUDA 路径不是 UTF-8")?.into()],
+        name: Some(String::from("kernel")),
+        use_fast_math: Some(fast_math),
+        options: vec![
+            String::from("--warning-as-error=all-warnings"),
+            format!("--std={CUDA_STANDARD}"),
+        ],
+        ..Default::default()
+    };
+    compile_ptx_with_opts(source, options).context("编译 CUDA PTX 失败")
+}
 fn push_define(lines: &mut Vec<String>, key: &str, value: impl Display) {
     lines.push(format!("#define {key} {value}"));
 }
 fn push_define_f32(lines: &mut Vec<String>, key: &str, value: f32) {
     lines.push(format!("#define {key} {value:.9e}f"));
 }
-pub(super) fn build_cuda_defines(config: &KernelConfig) -> String {
+fn build_cuda_defines(config: &KernelConfig) -> String {
     let mut lines = Vec::with_capacity(15);
     let ints = [
         ("CONFIG_SPP", config.spp),

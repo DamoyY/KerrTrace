@@ -1,18 +1,17 @@
 use super::{
-    blackbody::generate_blackbody_lut, defines::build_cuda_defines,
-    disk::generate_disk_temperature_lut, texture::CudaTextureLut,
+    blackbody::generate_blackbody_lut,
+    compiler::{build_cuda_source, compile_cuda},
+    disk::generate_disk_temperature_lut,
+    texture::CudaTextureLut,
 };
 use crate::config::Config;
-use alloc::{string::String, sync::Arc};
+use alloc::sync::Arc;
 use anyhow::{Context as _, Result, ensure};
-use cudarc::{
-    driver::{
-        CudaContext, CudaFunction, CudaStream, DeviceRepr, LaunchConfig, sys::CUdevice_attribute,
-    },
-    nvrtc::{CompileOptions, compile_ptx_with_opts},
+use cudarc::driver::{
+    CudaContext, CudaFunction, CudaStream, DeviceRepr, LaunchConfig, sys::CUdevice_attribute,
 };
 use num_traits::ToPrimitive as _;
-use std::{fs, path::Path};
+use std::path::Path;
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(super) struct KerrParams {
@@ -108,20 +107,8 @@ pub(super) fn build_cuda_kernels(
     cuda_dir: &Path,
     kerr_params: &KerrParams,
 ) -> Result<(CudaFunction, CudaFunction, CudaFunction)> {
-    let source = fs::read_to_string(cuda_dir.join("kernel.cu")).context("读取 kernel.cu 失败")?;
-    let defines = build_cuda_defines(&config.kernel);
-    let full_source = format!("{defines}\n{source}");
-    let mut options = vec![String::from("--warning-as-error=all-warnings")];
-    if config.cuda.use_fast_math {
-        options.push(String::from("--use_fast_math"));
-    }
-    let ptx_opts = CompileOptions {
-        include_paths: vec![cuda_dir.to_str().context("CUDA 路径不是 UTF-8")?.into()],
-        name: Some(String::from("kernel")),
-        options,
-        ..Default::default()
-    };
-    let ptx = compile_ptx_with_opts(&full_source, ptx_opts).context("编译 PTX 失败")?;
+    let source = build_cuda_source(&config.kernel);
+    let ptx = compile_cuda(&source, cuda_dir, config.cuda.use_fast_math)?;
     let module = context.load_module(ptx).context("加载 PTX 模块失败")?;
     let trace = module.load_function("trace_kernel")?;
     let bloom = module.load_function("bloom_horizontal")?;
