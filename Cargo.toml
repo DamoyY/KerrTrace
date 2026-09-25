@@ -1,3 +1,87 @@
+cargo-features = ["trim-paths", "panic-immediate-abort"]
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+restriction = { level = "warn", priority = -1 }
+
+absolute_paths = "allow"
+arbitrary_source_item_ordering = "allow"
+arithmetic_side_effects = "allow"
+big_endian_bytes = "allow"
+blanket_clippy_restriction_lints = "allow"
+cargo_common_metadata = "allow"
+else_if_without_else = "allow"
+exhaustive_structs = "allow"
+field_scoped_visibility_modifiers = "allow"
+float_arithmetic = "allow"
+implicit_return = "allow"
+inline_modules = "allow"
+min_ident_chars = "allow"
+missing_docs_in_private_items = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+missing_trait_methods = "allow"
+module_name_repetitions = "allow"
+multiple_crate_versions = "allow"
+non_ascii_literal = "allow"
+panic = "allow"
+print_stderr = "allow"
+print_stdout = "allow"
+pub_with_shorthand = "allow"
+question_mark_used = "allow"
+redundant_pub_crate = "allow"
+self_named_module_files = "allow"
+semicolon_outside_block = "allow"
+separated_literal_suffix = "allow"
+similar_names = "allow"
+single_call_fn = "allow"
+too_many_arguments = "allow"
+too_many_lines = "allow"
+undocumented_unsafe_blocks = "allow"
+unneeded_field_pattern = "allow"
+unwrap_used = "allow"
+use_debug = "allow"
+wildcard_dependencies = "allow"
+
+[lints.rust]
+future_incompatible = { level = "warn", priority = -1 }
+keyword_idents = { level = "warn", priority = -1 }
+let_underscore = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
+refining_impl_trait = { level = "warn", priority = -1 }
+rust_2024_compatibility = { level = "warn", priority = -1 }
+
+missing_docs = "allow"
+
+[profile.dev]
+opt-level = 0
+debug = true
+strip = "none"
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = 'unwind'
+incremental = true
+codegen-units = 256
+rpath = false
+trim-paths = "all"
+
+[profile.release]
+opt-level = 3
+debug = false
+strip = "symbols"
+debug-assertions = false
+overflow-checks = false
+lto = "fat"
+panic = "immediate-abort"
+incremental = false
+codegen-units = 1
+rpath = false
+trim-paths = "all"
+
 [package]
 name = "KerrTrace"
 version = "0.0.0"
@@ -5,23 +89,16 @@ edition = "2024"
 
 [dependencies]
 anyhow = "*"
-cudarc = { version = "*", features = ["cuda-version-from-build-system"] }
+cudarc = { version = "*", default-features = false, features = ["std", "driver", "runtime", "nvrtc", "dynamic-loading", "cuda-version-from-build-system"] }
 env_logger = "*"
+font8x8 = "*"
 glam = "*"
+hashbrown = "*"
 image = { version = "*", default-features = false, features = ["png"] }
 log = "*"
+mimalloc = "*"
+num-traits = "*"
 serde = { version = "*", features = ["derive"] }
-serde_yaml = { package = "serde_yaml_ng", version = "*" }
+serde-saphyr = "*"
 softbuffer = { version = "*", features = ["x11", "wayland"] }
 winit = { version = "*", features = ["rwh_06"] }
-
-[lints.clippy]
-all = "warn"
-pedantic = "warn"
-nursery = "warn"
-
-[profile.release]
-opt-level = 3
-lto = "fat"
-codegen-units = 1
-panic = "abort"

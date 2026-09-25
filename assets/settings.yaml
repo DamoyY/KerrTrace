@@ -1,7 +1,7 @@
 window:
   width: 2100
   height: 900
-  vsync: false
+  frame_limit: null
 camera:
   position: [80.0, 6.0, 0.0]
   yaw: -96.0
@@ -17,18 +17,14 @@ controls:
 renderer:
   block_dim: [16, 16]
   save_first_frame: true
-  first_frame_path: picture/first_frame.png
+  first_frame_path: assets/images/first_frame.png
 bloom:
   enabled: true
   intensity: 0.5
   radius: 48.0
 hud:
-  font_name: Consolas
   font_size: 15
   margin: [10, 10]
-  anchor_x: left
-  anchor_y: top
-  width: 600
   color: [255, 255, 255, 255]
 blackbody:
   lut_size: 4096
@@ -54,7 +50,7 @@ kernel:
   integrator:
     initial_step: 1e0
     tolerance: 1e-5
-    max_steps: 1e2
+    max_steps: 100
     max_attempts: 3
     transmittance_cutoff: 1e-2
     horizon_epsilon: 5e-7
