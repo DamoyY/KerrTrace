@@ -16,7 +16,7 @@ fn unsafe_configuration_is_rejected() {
         ("fov_limit: [1.0, 120.0]", "fov_limit: [120.0, 1.0]"),
         ("pitch_limit: [-80.0, 80.0]", "pitch_limit: [-90.0, 90.0]"),
         ("spp: 4", "spp: 0"),
-        ("max_steps: 100", "max_steps: 0"),
+        ("max_steps: 256", "max_steps: 0"),
         ("tolerance: 1e-5", "tolerance: .nan"),
         ("wavelength_step: 10.0", "wavelength_step: 1e-30"),
         ("lut_size: 4096", "lut_size: 1"),

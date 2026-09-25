@@ -50,8 +50,8 @@ kernel:
   integrator:
     initial_step: 1e0
     tolerance: 1e-5
-    max_steps: 100
-    max_attempts: 3
+    max_steps: 256
+    max_attempts: 12
     transmittance_cutoff: 1e-2
     horizon_epsilon: 5e-7
     escape_radius: 80.0

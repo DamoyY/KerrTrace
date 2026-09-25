@@ -64,8 +64,8 @@ __device__ __forceinline__ void ks_bl_from_xyz(float x, float y, float z, const 
     sin_th = sin_sq * inv_sin;
     float denom = r2 + a2;
     float inv = inv_sin * __fdividef(1.0f, denom);
-    float cos_phi = (r * z + p.a * x) * inv;
-    float sin_phi = (r * x - p.a * z) * inv;
+    float cos_phi = (r * z - p.a * x) * inv;
+    float sin_phi = (r * x + p.a * z) * inv;
     phi = atan2f(sin_phi, cos_phi);
 }
 __device__ __forceinline__ RayDerivs get_derivs(const RayState &s, float pt)
@@ -83,7 +83,7 @@ __device__ __forceinline__ RayDerivs get_derivs(const RayState &s, float pt)
     float inv_r = rsqrtf(r2);
     float r = r2 * inv_r;
     float dr2_dx = x * (1.0f + u * inv_s);
-    float dr2_dy = y * (1.0f + (u + 4.0f * a2) * (0.5f * inv_s));
+    float dr2_dy = y * (1.0f + (u + 2.0f * a2) * inv_s);
     float dr2_dz = z * (1.0f + u * inv_s);
     float inv_2r = 0.5f * inv_r;
     float drdx = dr2_dx * inv_2r;
@@ -92,14 +92,14 @@ __device__ __forceinline__ RayDerivs get_derivs(const RayState &s, float pt)
     float denom = r2 + a2;
     float inv_denom = __fdividef(1.0f, denom);
     float inv_denom2 = inv_denom * inv_denom;
-    float lx = (r * x - p.a * z) * inv_denom;
+    float lx = (r * x + p.a * z) * inv_denom;
     float ly = y * inv_r;
-    float lz = (r * z + p.a * x) * inv_denom;
+    float lz = (r * z - p.a * x) * inv_denom;
     float r3 = r2 * r;
     float denomH = fmaf(r2, r2, a2 * y * y);
     float inv_denomH = __fdividef(1.0f, denomH);
     float H = p.M * r3 * inv_denomH;
-    float lp = fmaf(lx, s.px, fmaf(ly, s.py, fmaf(lz, s.pz, -pt)));
+    float lp = fmaf(lx, s.px, fmaf(ly, s.py, fmaf(lz, s.pz, pt)));
     RayDerivs d;
     float common_H_lp = 2.0f * H * lp;
     d.dx = s.px - common_H_lp * lx;
@@ -108,12 +108,12 @@ __device__ __forceinline__ RayDerivs get_derivs(const RayState &s, float pt)
     float dD_dx = 2.0f * r * drdx;
     float dD_dy = 2.0f * r * drdy;
     float dD_dz = 2.0f * r * drdz;
-    float Nx = r * x - p.a * z;
-    float Nz = r * z + p.a * x;
+    float Nx = r * x + p.a * z;
+    float Nz = r * z - p.a * x;
     float dNx_dx = drdx * x + r;
     float dNx_dy = drdy * x;
-    float dNx_dz = drdz * x - p.a;
-    float dNz_dx = drdx * z + p.a;
+    float dNx_dz = drdz * x + p.a;
+    float dNz_dx = drdx * z - p.a;
     float dNz_dy = drdy * z;
     float dNz_dz = drdz * z + r;
     float dlx_dx = (dNx_dx * denom - Nx * dD_dx) * inv_denom2;

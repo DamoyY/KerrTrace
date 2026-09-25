@@ -109,7 +109,7 @@ pub(super) fn build_cuda_kernels(
     kerr_params: &KerrParams,
 ) -> Result<(CudaFunction, CudaFunction, CudaFunction)> {
     let source = fs::read_to_string(cuda_dir.join("kernel.cu")).context("读取 kernel.cu 失败")?;
-    let defines = build_cuda_defines(&config.kernel, config.blackbody.wavelength_step);
+    let defines = build_cuda_defines(&config.kernel);
     let full_source = format!("{defines}\n{source}");
     let mut options = vec![String::from("--warning-as-error=all-warnings")];
     if config.cuda.use_fast_math {

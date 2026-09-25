@@ -1,13 +1,13 @@
 use alloc::sync::Arc;
-use anyhow::{Context as _, Result, ensure};
+use anyhow::{Context as _, Result};
 use cudarc::driver::{CudaEvent, CudaSlice, CudaStream, PinnedHostSlice};
 pub(super) struct FrameBuffer {
     pub(super) hdr_buffer: CudaSlice<f32>,
     pub(super) bloom_buffer: CudaSlice<f32>,
     pub(super) image_gpu: CudaSlice<u32>,
     pub(super) host_image: PinnedHostSlice<u32>,
-    pub(super) lut_error_flag: CudaSlice<u32>,
-    pub(super) lut_error_host: PinnedHostSlice<u32>,
+    pub(super) device_error: CudaSlice<u32>,
+    pub(super) host_error: PinnedHostSlice<u32>,
     pub(super) ready_event: CudaEvent,
 }
 impl FrameBuffer {
@@ -21,8 +21,8 @@ impl FrameBuffer {
             bloom_buffer: stream.alloc_zeros(hdr_len)?,
             image_gpu: stream.alloc_zeros(pixel_count)?,
             host_image: unsafe { context.alloc_pinned(pixel_count) }?,
-            lut_error_flag: stream.alloc_zeros(2)?,
-            lut_error_host: unsafe { context.alloc_pinned(2) }?,
+            device_error: stream.alloc_zeros(2)?,
+            host_error: unsafe { context.alloc_pinned(2) }?,
             ready_event: context.new_event(None)?,
         })
     }
@@ -34,15 +34,21 @@ impl FrameBuffer {
         {
             return Ok(None);
         }
-        let errors = self.lut_error_host.as_slice()?;
-        let &[flag, temperature] = errors else {
-            anyhow::bail!("LUT 错误缓冲区长度异常");
+        let errors = self.host_error.as_slice()?;
+        let &[flag, bits] = errors else {
+            anyhow::bail!("设备错误缓冲区长度异常");
         };
-        ensure!(
-            flag == 0,
-            "颜色温度超过 lut_max_temp: {} > {max_temp}",
-            f32::from_bits(temperature)
-        );
+        let value = f32::from_bits(bits);
+        match flag {
+            0 => {}
+            1 => anyhow::bail!("颜色温度超过 lut_max_temp: {value} > {max_temp}"),
+            2 => anyhow::bail!("积分重试耗尽: normalized_error={value}"),
+            3 => anyhow::bail!("积分步长无效或位置停滞: step={value}"),
+            4 => anyhow::bail!("积分步数耗尽: radius={value}"),
+            5 => anyhow::bail!("静止相机应位于静止极限之外且光线初值有限: energy={value}"),
+            6 => anyhow::bail!("吸积盘辐射计算无效: value={value}"),
+            _ => anyhow::bail!("未知设备错误: code={flag}, value={value}"),
+        }
         Ok(Some(self.host_image.as_slice()?))
     }
 }

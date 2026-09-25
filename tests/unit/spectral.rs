@@ -5,7 +5,7 @@ use anyhow::{Context as _, Result, ensure};
 fn shader_defines_preserve_small_positive_parameters() -> Result<()> {
     let mut settings = config::parse(include_str!("../../assets/settings.yaml"))?;
     settings.kernel.integrator.tolerance = 1e-12_f32;
-    let defines = build_cuda_defines(&settings.kernel, settings.blackbody.wavelength_step);
+    let defines = build_cuda_defines(&settings.kernel);
     let definition = defines
         .lines()
         .find(|line| line.starts_with("#define CONFIG_INTEGRATOR_TOLERANCE "))

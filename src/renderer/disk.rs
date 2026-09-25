@@ -3,53 +3,51 @@ use crate::{
     config::Config,
     config::numbers::{ensure_finite_f32, f32_from_f64_with_context},
 };
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, ensure};
 use log::error;
-fn calc_isco(a_norm: f32, prograde: bool, mass: f32) -> f32 {
-    let aa = a_norm * a_norm;
+fn calc_isco(a_norm: f32, mass: f32) -> Result<f32> {
+    let spin = f64::from(a_norm.abs());
+    let aa = spin * spin;
     let z1 = (1.0 - aa)
         .cbrt()
-        .mul_add((1.0 + a_norm).cbrt() + (1.0 - a_norm).cbrt(), 1.0);
-    let z2 = (3.0_f32).mul_add(aa, z1 * z1).sqrt();
-    let sign = if prograde { -1.0_f32 } else { 1.0_f32 };
-    let term_inside = (3.0_f32 - z1) * (2.0_f32.mul_add(z2, 3.0_f32 + z1));
-    mass * sign.mul_add(term_inside.max(0.0_f32).sqrt(), 3.0_f32 + z2)
+        .mul_add((1.0 + spin).cbrt() + (1.0 - spin).cbrt(), 1.0);
+    let z2 = 3.0_f64.mul_add(aa, z1 * z1).sqrt();
+    let term_inside = (3.0_f64 - z1) * 2.0_f64.mul_add(z2, 3.0_f64 + z1);
+    f32_from_f64_with_context(
+        f64::from(mass) * (3.0_f64 + z2 - term_inside.sqrt()),
+        "同向 ISCO",
+    )
 }
-fn calc_novikov_thorne_factor(r: f32, a_norm: f32, r_isco: f32, inv_m: f32) -> f32 {
+fn calc_novikov_thorne_factor(r: f32, a_norm: f32, r_isco: f32, inv_m: f32) -> Result<f32> {
     if r <= r_isco {
-        return 0.0;
+        return Ok(0.0);
     }
-    let r_norm = r * inv_m;
-    let r_isco_norm = r_isco * inv_m;
+    let spin = f64::from(a_norm.abs());
+    let r_norm = f64::from(r) * f64::from(inv_m);
+    let r_isco_norm = f64::from(r_isco) * f64::from(inv_m);
     let x = r_norm.sqrt();
     let x_ms = r_isco_norm.sqrt();
-    let angle_base = (-a_norm).acos() * (1.0 / 3.0);
-    let ang_step = 2.094_395_2_f32;
+    let angle_base = (-spin).acos() / 3.0_f64;
+    let ang_step = core::f64::consts::TAU / 3.0_f64;
     let roots = [
-        2.0_f32 * angle_base.cos(),
-        2.0_f32 * (angle_base - ang_step).cos(),
-        2.0_f32 * (angle_base + ang_step).cos(),
+        2.0_f64 * angle_base.cos(),
+        2.0_f64 * (angle_base - ang_step).cos(),
+        2.0_f64 * (angle_base + ang_step).cos(),
     ];
-    let mut sum_log = 0.0_f32;
-    let [root_a, root_b, root_c] = roots;
-    for (xi, other_a, other_b) in [
-        (root_a, root_b, root_c),
-        (root_b, root_c, root_a),
-        (root_c, root_a, root_b),
-    ] {
-        let denom = xi * (xi - other_a) * (xi - other_b);
-        if denom <= 0.0 {
-            continue;
-        }
-        let coef = 3.0_f32 * (xi - a_norm) * (xi - a_norm) / denom;
-        let val = (x - xi) / (x_ms - xi);
-        if val > 0.0 {
-            sum_log = coef.mul_add(val.ln(), sum_log);
-        }
+    let mut sum_log = 0.0_f64;
+    for xi in roots {
+        let coef = 0.25_f64 * xi * xi.mul_add(xi, -1.0_f64);
+        let log_ratio = ((x - x_ms) / (x_ms - xi)).ln_1p();
+        sum_log = coef.mul_add(log_ratio, sum_log);
     }
-    let q = (1.5_f32 * a_norm).mul_add(-(x / x_ms).ln(), x - x_ms) - sum_log;
-    let geometric_denom = r_norm * (2.0_f32).mul_add(a_norm, r_norm.mul_add(x, -(3.0 * x)));
-    (q / geometric_denom).max(0.0)
+    let q = (-1.5_f64 * spin).mul_add(((x - x_ms) / x_ms).ln_1p(), x - x_ms) - sum_log;
+    let geometric_denom =
+        r_norm * r_norm * 2.0_f64.mul_add(spin, r_norm.mul_add(x, -(3.0_f64 * x)));
+    ensure!(
+        q >= 0.0_f64 && geometric_denom > 0.0_f64,
+        "薄盘通量无效: Q={q}, denominator={geometric_denom}"
+    );
+    f32_from_f64_with_context(q / geometric_denom, "吸积盘通量因子")
 }
 pub(super) fn build_kerr_params(config: &Config) -> Result<KerrParams> {
     let window_width = config.window.width;
@@ -68,14 +66,15 @@ pub(super) fn build_kerr_params(config: &Config) -> Result<KerrParams> {
     if !mass.is_finite() {
         return Err(anyhow!("黑洞质量不是有限值: {mass}"));
     }
-    if mass == 0.0 {
-        return Err(anyhow!("黑洞质量不能为 0"));
-    }
+    ensure!(
+        mass > 0.0_f32 && spin.abs() < mass,
+        "黑洞参数应满足 mass > |spin|"
+    );
     let inv_m = 1.0 / mass;
     let aa = spin * spin;
     let a_norm = spin * inv_m;
     let rh = mass + mass.mul_add(mass, -aa).max(0.0).sqrt();
-    let disk_inner = calc_isco(a_norm, true, mass);
+    let disk_inner = calc_isco(a_norm, mass)?;
     if !rh.is_finite() || !disk_inner.is_finite() {
         return Err(anyhow!("Kerr 参数计算产生了非有限值"));
     }
@@ -148,7 +147,7 @@ pub(super) fn generate_disk_temperature_lut(
     for i in 0..size {
         let ratio = ratio_from_index(i, denom_u32, "吸积盘温度表")?;
         let r = f32_from_f64_with_context(ratio.mul_add(span, inner), "吸积盘半径")?;
-        let flux_factor = calc_novikov_thorne_factor(r, params.a_norm, disk_inner, params.inv_m);
+        let flux_factor = calc_novikov_thorne_factor(r, params.a_norm, disk_inner, params.inv_m)?;
         let finite_flux_factor = ensure_finite_f32(flux_factor, "吸积盘通量因子")?;
         let v = finite_flux_factor.sqrt().sqrt();
         data.push(ensure_finite_f32(v, "吸积盘温度因子")?);

@@ -1,12 +1,14 @@
+__device__ void report_error(unsigned int *error_flag, unsigned int code, float value)
+{
+    if (atomicCAS(error_flag, 0u, code) == 0u)
+        error_flag[1] = __float_as_uint(value);
+}
 __device__ __forceinline__ float3 fetch_color_from_lut(float T, cudaTextureObject_t lut_tex, int lut_size,
                                                        float max_temp, unsigned int *error_flag)
 {
     if (T > max_temp)
     {
-        if (atomicCAS(error_flag, 0u, 1u) == 0u)
-        {
-            error_flag[1] = __float_as_uint(T);
-        }
+        report_error(error_flag, 1u, T);
         return make_float3(0.0f, 0.0f, 0.0f);
     }
     float t_norm = T / max_temp;

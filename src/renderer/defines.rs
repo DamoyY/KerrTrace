@@ -6,7 +6,7 @@ fn push_define(lines: &mut Vec<String>, key: &str, value: impl Display) {
 fn push_define_f32(lines: &mut Vec<String>, key: &str, value: f32) {
     lines.push(format!("#define {key} {value:.9e}f"));
 }
-pub(super) fn build_cuda_defines(config: &KernelConfig, wavelength_step: f32) -> String {
+pub(super) fn build_cuda_defines(config: &KernelConfig) -> String {
     let mut lines = Vec::with_capacity(15);
     let ints = [
         ("CONFIG_SPP", config.spp),
@@ -40,7 +40,6 @@ pub(super) fn build_cuda_defines(config: &KernelConfig, wavelength_step: f32) ->
         ),
         ("CONFIG_HORIZON_EPSILON", config.integrator.horizon_epsilon),
         ("CONFIG_ESCAPE_RADIUS", config.integrator.escape_radius),
-        ("CONFIG_BLACKBODY_WAVELENGTH_STEP", wavelength_step),
     ];
     for (key, value) in floats {
         push_define_f32(&mut lines, key, value);

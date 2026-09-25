@@ -1,5 +1,17 @@
 #pragma once
 #include "geometry.cuh"
+__device__ bool finite_state(const RayState &s)
+{
+    return isfinite(s.x) && isfinite(s.y) && isfinite(s.z) && isfinite(s.px) && isfinite(s.py) && isfinite(s.pz);
+}
+__device__ float step_scale(float error)
+{
+    if (!isfinite(error))
+        return 0.2f;
+    if (error == 0.0f)
+        return 5.0f;
+    return fminf(5.0f, fmaxf(0.2f, 0.9f * __powf(error, -0.2f)));
+}
 __device__ RayState integrate_step(const RayState &s, float pt, float h_step, float tol, const RayDerivs &k1,
                                    RayDerivs &k3, RayDerivs &k4, RayDerivs &k5, RayDerivs &k6, RayDerivs &k7,
                                    float &error)
@@ -82,5 +94,8 @@ __device__ RayState integrate_step(const RayState &s, float pt, float h_step, fl
         fabsf(h_step * (dc1 * k1.dpz + dc3 * k3.dpz + dc4 * k4.dpz + dc5 * k5.dpz + dc6 * k6.dpz + dc7 * k7.dpz)) /
         scale_pz;
     error = fmaxf(fmaxf(fmaxf(err_x, err_y), fmaxf(err_z, err_px)), fmaxf(err_py, err_pz));
+    if (!finite_state(next_s) || !isfinite(err_x) || !isfinite(err_y) || !isfinite(err_z) || !isfinite(err_px) ||
+        !isfinite(err_py) || !isfinite(err_pz))
+        error = __int_as_float(0x7f800000);
     return next_s;
 }

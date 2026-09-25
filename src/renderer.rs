@@ -2,6 +2,12 @@ mod blackbody;
 mod defines;
 mod disk;
 mod frame;
+#[cfg(test)]
+#[path = "../tests/integration/invariants.rs"]
+mod invariants;
+#[cfg(test)]
+#[path = "../tests/unit/luminosity.rs"]
+mod luminosity;
 mod pipeline;
 #[cfg(test)]
 #[path = "../tests/unit/spectral.rs"]

@@ -13,7 +13,7 @@ impl CudaRenderer {
         let Some(frame) = self.available.front_mut() else {
             return Ok(false);
         };
-        self.stream.memset_zeros(&mut frame.lut_error_flag)?;
+        self.stream.memset_zeros(&mut frame.device_error)?;
         let mut trace = self.stream.launch_builder(&self.trace_kernel);
         trace
             .arg(&mut frame.hdr_buffer)
@@ -29,14 +29,14 @@ impl CudaRenderer {
             .arg(&self.lut_texture.texture)
             .arg(&self.lut_size)
             .arg(&self.lut_max_temp)
-            .arg(&mut frame.lut_error_flag)
+            .arg(&mut frame.device_error)
             .arg(&self.disk_texture.texture)
             .arg(&self.disk_inner)
             .arg(&self.disk_outer)
             .arg(&fov_scale);
         unsafe { trace.launch(self.launch_config) }.context("启动 trace kernel 失败")?;
         self.stream
-            .memcpy_dtoh(&frame.lut_error_flag, &mut frame.lut_error_host)?;
+            .memcpy_dtoh(&frame.device_error, &mut frame.host_error)?;
         if self.bloom_active != 0_i32 {
             let mut bloom = self.stream.launch_builder(&self.bloom_kernel);
             bloom
